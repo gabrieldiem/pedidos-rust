@@ -5,7 +5,7 @@ Para información sobre setup del proyecto ver el documento [`./docs/contribute.
 # PedidosRust - Grupo MutexMasters
 
 <p align="center">
-    <img src="./docs/imgs/pedidos_rust.png alt="PedidosRust logo">
+    <img src="./docs/imgs/pedidos_rust.png" alt="PedidosRust logo" height="300px">
 </p>
 
 PedidosRust es una nueva aplicación para conectar restaurantes, repartidores y comensales. Gracias a su innovadora implementación distribuida, permitirá reducir los costos y apuntar a ser líder en el mercado.
