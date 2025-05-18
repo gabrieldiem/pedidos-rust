@@ -8,7 +8,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  pre-commit:
+  pre-commit-hooks:
     runs-on: ubuntu-24.04
 
     steps:
