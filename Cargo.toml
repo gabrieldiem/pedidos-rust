@@ -1,6 +1,3 @@
-[package]
-name = "pedidos-rust"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
+[workspace]
+resolver="3"
+members = ["common", "customer", "payment", "restaurant", "rider"]
