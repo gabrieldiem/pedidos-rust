@@ -21,6 +21,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pedidos-rust"
+version = "0.1.0"
+dependencies = [
+ "common",
+]
+
+[[package]]
 name = "restaurant"
 version = "0.1.0"
 dependencies = [
