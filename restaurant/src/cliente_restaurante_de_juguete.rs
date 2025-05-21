@@ -1,9 +1,8 @@
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::TcpStream,
-    time::{sleep, Duration},
+    time::{Duration, sleep},
 };
-
 
 /*
    Agrego este ejemplo de juguete para probar que el restaurante funciona. El ejemplo es este:
@@ -24,6 +23,7 @@ use tokio::{
 
         Pedido B termina su sleep, se envía la respuesta "Pedido B listo".
 */
+#[allow(dead_code)]
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Spawn para Pedido A (en t=0s)
@@ -45,6 +45,7 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn hacer_pedido(pedido: &str) {
     match TcpStream::connect("127.0.0.1:8080").await {
         Ok(mut stream) => {

@@ -9,11 +9,9 @@ use tokio::{
 };
 
 async fn manejar_conexion(socket: TcpStream) -> anyhow::Result<()> {
-
     let (reader, mut writer) = socket.into_split();
     let mut reader = BufReader::new(reader);
     let mut buffer = String::new();
-
 
     let n = reader.read_line(&mut buffer).await?;
     if n == 0 {
@@ -28,7 +26,7 @@ async fn manejar_conexion(socket: TcpStream) -> anyhow::Result<()> {
     if aceptado {
         writer.write_all(b"OK\n").await?;
         println!("Pedido aceptado: {}", pedido);
-        sleep(Duration::from_secs(2)).await;    // Quizás debería ser un random
+        sleep(Duration::from_secs(2)).await; // Quizás debería ser un random
         // Puede ser rechazado luego de haber sido aceptado? Si es así iría acá
         println!("Pedido listo: {}", pedido);
         let respuesta = format!("Pedido '{}' listo\n", pedido);
@@ -42,11 +40,11 @@ async fn manejar_conexion(socket: TcpStream) -> anyhow::Result<()> {
 }
 
 /*
- * Recibe constantemente conexiones TCP (van a ser pedidos, TODO implementar un protocolo que verifique esto).
- * Por cada pedido se levanta una nueva async task. No se bloquea el hilo principal gracias al funcionamiento de las async tasks,
- * y se pueden atender múltiples pedidos al mismo tiempo.
+* Recibe constantemente conexiones TCP (van a ser pedidos, TODO implementar un protocolo que verifique esto).
+* Por cada pedido se levanta una nueva async task. No se bloquea el hilo principal gracias al funcionamiento de las async tasks,
+* y se pueden atender múltiples pedidos al mismo tiempo.
 
- */
+*/
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
