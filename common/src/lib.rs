@@ -3,5 +3,6 @@ pub fn a_common_function(message: &str) {
 }
 
 pub mod constants;
+pub mod protocol;
 pub mod tcp;
 pub mod utils;
