@@ -4,7 +4,7 @@ use common::utils::logger::Logger;
 use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
-use common::protocol::{GetRestaurants, Restaurants, SocketMessage};
+use common::protocol::{GetRestaurants, Order, OrderContent, PushNotification, SocketMessage};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use std::io;
@@ -21,13 +21,17 @@ impl Actor for Customer {
     type Context = Context<Self>;
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Start;
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Stop;
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ChooseRestaurant(pub String);
 
 #[async_handler]
 impl Handler<Start> for Customer {
@@ -55,32 +59,69 @@ impl Handler<GetRestaurants> for Customer {
     async fn handle(&mut self, _msg: GetRestaurants, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Getting Restaurants");
 
-        // message serialization
-        let msg_to_send = match serde_json::to_string(&SocketMessage::GetRestaurants) {
-            Ok(ok_result) => ok_result,
-            Err(e) => {
-                self.logger
-                    .error(&format!("Failed to serialize message: {}", e));
-                return;
-            }
-        };
-
-        // sending message
-        if let Err(e) = self.tcp_sender.try_send(TcpMessage(msg_to_send + "\n")) {
-            self.logger
-                .error(&format!("Failed to write to stream: {}", e));
-            return;
+        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants) {
+            self.logger.error(&e.to_string());
         }
     }
 }
 
 #[async_handler]
-impl Handler<Restaurants> for Customer {
+impl Handler<ChooseRestaurant> for Customer {
     type Result = ();
 
-    async fn handle(&mut self, msg: Restaurants, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, msg: ChooseRestaurant, _ctx: &mut Self::Context) -> Self::Result {
+        let restaurants = match serde_json::from_str::<Vec<String>>(&msg.0) {
+            Ok(restaurants) => restaurants,
+            Err(e) => {
+                self.logger
+                    .error(&format!("Failed to deserialize message: {}", e));
+                return;
+            }
+        };
         self.logger
-            .debug(&format!("These are the restaurants: {}", msg.0));
+            .debug(&format!("All restaurants: {:?}", restaurants));
+
+        let chosen_restaurant = match restaurants.first() {
+            Some(restaurant) => restaurant.to_owned(),
+            None => {
+                self.logger.warn("There are no restaurants");
+                return;
+            }
+        };
+
+        let amount = 500_f64;
+        let order = OrderContent::new(chosen_restaurant, amount);
+        _ctx.address().do_send(Order(order));
+    }
+}
+
+#[async_handler]
+impl Handler<Order> for Customer {
+    type Result = ();
+
+    async fn handle(&mut self, msg: Order, _ctx: &mut Self::Context) -> Self::Result {
+        let order = msg.0;
+
+        self.logger.debug(&format!(
+            "I will order {} from {}",
+            order.amount, order.restaurant
+        ));
+
+        let msg = SocketMessage::Order(order);
+
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<PushNotification> for Customer {
+    type Result = ();
+
+    async fn handle(&mut self, msg: PushNotification, _ctx: &mut Self::Context) -> Self::Result {
+        let notification = msg.0;
+        self.logger.info(notification.as_str());
     }
 }
 
@@ -94,7 +135,10 @@ impl Customer {
                     ctx.address().do_send(GetRestaurants);
                 }
                 SocketMessage::Restaurants(data) => {
-                    ctx.address().do_send(Restaurants(data));
+                    ctx.address().do_send(ChooseRestaurant(data));
+                }
+                SocketMessage::PushNotification(data) => {
+                    ctx.address().do_send(PushNotification(data));
                 }
                 _ => {
                     self.logger
@@ -106,6 +150,23 @@ impl Customer {
                     .error(&format!("Failed to deserialize message: {}", e));
             }
         }
+    }
+
+    fn send_message(&self, socket_message: &SocketMessage) -> Result<(), String> {
+        // message serialization
+        let msg_to_send = match serde_json::to_string(socket_message) {
+            Ok(ok_result) => ok_result,
+            Err(e) => {
+                return Err(format!("Failed to serialize message: {}", e));
+            }
+        };
+
+        // sending message
+        if let Err(e) = self.tcp_sender.try_send(TcpMessage(msg_to_send + "\n")) {
+            return Err(format!("Failed to write to stream: {}", e));
+        }
+
+        Ok(())
     }
 }
 

@@ -4,7 +4,7 @@ use std::io;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::constants::*;
-use common::protocol::SocketMessage;
+use common::protocol::{Order, SocketMessage};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use std::net::SocketAddr;
@@ -22,7 +22,7 @@ impl Actor for ClientConnection {
     type Context = Context<Self>;
 }
 
-#[derive(Message)]
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct SendRestaurants;
 
@@ -33,23 +33,31 @@ impl Handler<SendRestaurants> for ClientConnection {
     async fn handle(&mut self, _msg: SendRestaurants, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Sending Restaurants");
 
-        // message serialization
         let restaurantes =
             serde_json::to_string(&vec!["McDonalds", "BurgerKing", "Wendys"]).unwrap();
 
-        let msg_to_send = match serde_json::to_string(&SocketMessage::Restaurants(restaurantes)) {
-            Ok(ok_result) => ok_result,
-            Err(e) => {
-                self.logger
-                    .error(&format!("Failed to serialize message: {}", e));
-                return;
-            }
-        };
+        let msg = SocketMessage::Restaurants(restaurantes);
 
-        // sending message
-        if let Err(e) = self.tcp_sender.try_send(TcpMessage(msg_to_send + "\n")) {
-            self.logger
-                .error(&format!("Failed to write to stream: {}", e));
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<Order> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, msg: Order, _ctx: &mut Self::Context) -> Self::Result {
+        let order = msg.0;
+        self.logger.debug(&format!(
+            "Processing order of {} from {}",
+            order.amount, order.restaurant
+        ));
+
+        let msg = SocketMessage::PushNotification("Processing order".to_owned());
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
             return;
         }
     }
@@ -69,6 +77,10 @@ impl ClientConnection {
                     self.logger.debug("Got request for GetRestaurants");
                     ctx.address().do_send(SendRestaurants);
                 }
+                SocketMessage::Order(order) => {
+                    self.logger.debug("Got order request");
+                    ctx.address().do_send(Order(order));
+                }
                 _ => {
                     self.logger
                         .warn(&format!("Unrecognized message: {:?}", message));
@@ -79,6 +91,23 @@ impl ClientConnection {
                     .error(&format!("Failed to deserialize message: {}", e));
             }
         }
+    }
+
+    fn send_message(&self, socket_message: &SocketMessage) -> Result<(), String> {
+        // message serialization
+        let msg_to_send = match serde_json::to_string(socket_message) {
+            Ok(ok_result) => ok_result,
+            Err(e) => {
+                return Err(format!("Failed to serialize message: {}", e));
+            }
+        };
+
+        // sending message
+        if let Err(e) = self.tcp_sender.try_send(TcpMessage(msg_to_send + "\n")) {
+            return Err(format!("Failed to write to stream: {}", e));
+        }
+
+        Ok(())
     }
 }
 
