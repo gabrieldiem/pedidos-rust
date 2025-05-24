@@ -17,6 +17,7 @@ struct Rider {
     logger: Logger,
     location: Location,
     customer_location: Option<Location>,
+    busy: bool,
 }
 
 impl Actor for Rider {
@@ -123,7 +124,7 @@ impl Handler<DeliverOrderToCustomerHands> for Rider {
         _msg: DeliverOrderToCustomerHands,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        self.logger.info("Delivering to order customer hands...");
+        self.logger.info("Delivering order to customer hands...");
         sleep(Duration::from_millis(4000)).await;
 
         self.logger.info("Delivery done!");
@@ -133,6 +134,7 @@ impl Handler<DeliverOrderToCustomerHands> for Rider {
             return;
         }
 
+        self.busy = false;
         _ctx.address().do_send(Stop);
     }
 }
@@ -145,13 +147,14 @@ impl Handler<DeliveryOffer> for Rider {
         self.logger.debug("Got DeliveryOffer");
         let will_accept = true; // can be changed to random afterward
 
-        if will_accept {
+        if will_accept && !self.busy {
             self.logger.debug(&format!(
                 "Delivery accepted for customer {}",
                 msg.customer_id
             ));
 
             self.customer_location = Some(msg.customer_location);
+            self.busy = true;
 
             let msg = SocketMessage::DeliveryOfferAccepted(msg.customer_id);
             if let Err(e) = self.send_message(&msg) {
@@ -257,6 +260,7 @@ async fn main() -> io::Result<()> {
             logger: Logger::new(Some("[RIDER]")),
             location: starting_location,
             customer_location: None,
+            busy: false,
         }
     });
 
