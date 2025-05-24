@@ -75,6 +75,16 @@ pub struct RiderArrivedAtCustomer {
     pub rider_id: u32,
 }
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct DeliveryDone {
+    pub rider_id: u32,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct FinishDelivery;
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
@@ -85,5 +95,7 @@ pub enum SocketMessage {
     LocationUpdate(Location),     // Location is the new location
     DeliveryOffer(u32, Location), // u32 is customer_id, Location is customer location
     DeliveryOfferAccepted(u32),   // u32 is customer_id
-    RiderArrivedAtCustomer,       // u32 is rider_id
+    RiderArrivedAtCustomer,
+    DeliveryDone,
+    FinishDelivery,
 }

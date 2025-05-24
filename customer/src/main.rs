@@ -5,7 +5,7 @@ use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    GetRestaurants, Location, Order, OrderContent, PushNotification, SocketMessage,
+    FinishDelivery, GetRestaurants, Location, Order, OrderContent, PushNotification, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -54,7 +54,7 @@ impl Handler<Stop> for Customer {
     type Result = ();
 
     async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.info("Stopping Customer actor");
+        self.logger.debug("Stopping Customer");
         _ctx.stop();
     }
 }
@@ -131,6 +131,17 @@ impl Handler<PushNotification> for Customer {
     }
 }
 
+#[async_handler]
+impl Handler<FinishDelivery> for Customer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.info("Delivery done! I got my order");
+
+        _ctx.address().do_send(Stop);
+    }
+}
+
 impl Customer {
     #[allow(unreachable_patterns)]
     fn dispatch_message(&mut self, line_read: String, ctx: &mut <Customer as Actor>::Context) {
@@ -147,6 +158,9 @@ impl Customer {
                 }
                 SocketMessage::PushNotification(notification_msg) => {
                     ctx.address().do_send(PushNotification { notification_msg });
+                }
+                SocketMessage::FinishDelivery => {
+                    ctx.address().do_send(FinishDelivery);
                 }
                 _ => {
                     self.logger

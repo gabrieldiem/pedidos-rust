@@ -3,7 +3,8 @@ use crate::messages::{FindRider, RegisterCustomer, RegisterRider};
 use actix::{Actor, Addr, Context, Handler};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    DeliveryOffer, DeliveryOfferAccepted, Location, PushNotification, RiderArrivedAtCustomer,
+    DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, PushNotification,
+    RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -166,6 +167,39 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
                             .address
                             .do_send(PushNotification { notification_msg });
                     }
+
+                    None => {
+                        self.logger.warn("Failed finding customer");
+                    }
+                };
+            }
+
+            None => {
+                self.logger.warn("Failed finding order in progress");
+            }
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<DeliveryDone> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
+        let possible_customer_id = self.orders_in_process.get(&msg.rider_id).copied();
+
+        match possible_customer_id {
+            Some(customer_id) => {
+                match self.customers.get(&customer_id) {
+                    Some(customer) => match self.orders_in_process.remove(&msg.rider_id) {
+                        Some(_) => {
+                            self.logger.debug("Removed finished order");
+                            customer.address.do_send(FinishDelivery);
+                        }
+                        None => {
+                            self.logger.debug("No order found to be removed");
+                        }
+                    },
 
                     None => {
                         self.logger.warn("Failed finding customer");

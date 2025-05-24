@@ -9,9 +9,8 @@ use common::utils::logger::Logger;
 use std::io;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpStream;
-use tokio_stream::wrappers::LinesStream;
-
 use tokio::time::{Duration, sleep};
+use tokio_stream::wrappers::LinesStream;
 
 struct Rider {
     tcp_sender: Addr<TcpSender>,
@@ -56,7 +55,7 @@ impl Handler<Stop> for Rider {
     type Result = ();
 
     async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.info("Stopping Rider actor");
+        self.logger.debug("Stopping Rider");
         _ctx.stop();
     }
 }
@@ -100,7 +99,7 @@ impl Handler<GoToCustomerLocation> for Rider {
                 new_location: self.location,
             });
 
-            self.logger.debug(&format!(
+            self.logger.info(&format!(
                 "Arrived at customer house ({}, {})",
                 customer_location.x, customer_location.y
             ));
@@ -126,6 +125,15 @@ impl Handler<DeliverOrderToCustomerHands> for Rider {
     ) -> Self::Result {
         self.logger.info("Delivering to order customer hands...");
         sleep(Duration::from_millis(4000)).await;
+
+        self.logger.info("Delivery done!");
+
+        if let Err(e) = self.send_message(&SocketMessage::DeliveryDone) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+
+        _ctx.address().do_send(Stop);
     }
 }
 

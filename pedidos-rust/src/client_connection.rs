@@ -3,8 +3,8 @@ use crate::messages::{FindRider, RegisterCustomer, RegisterRider};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    DeliveryOffer, DeliveryOfferAccepted, Location, LocationUpdate, Order, PushNotification,
-    RiderArrivedAtCustomer, SocketMessage,
+    DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, LocationUpdate,
+    Order, PushNotification, RiderArrivedAtCustomer, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -156,6 +156,27 @@ impl Handler<RiderArrivedAtCustomer> for ClientConnection {
     }
 }
 
+#[async_handler]
+impl Handler<DeliveryDone> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
+        self.connection_manager.do_send(msg);
+    }
+}
+
+#[async_handler]
+impl Handler<FinishDelivery> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::FinishDelivery) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
 impl ClientConnection {
     #[allow(unreachable_patterns)]
     fn dispatch_message(
@@ -189,6 +210,10 @@ impl ClientConnection {
                     self.logger.debug("Rider arrived at customer location");
                     ctx.address()
                         .do_send(RiderArrivedAtCustomer { rider_id: self.id });
+                }
+                SocketMessage::DeliveryDone => {
+                    self.logger.debug("Rider finished the delivery");
+                    ctx.address().do_send(DeliveryDone { rider_id: self.id });
                 }
                 _ => {
                     self.logger
