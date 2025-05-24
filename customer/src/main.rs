@@ -4,7 +4,9 @@ use common::utils::logger::Logger;
 use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
-use common::protocol::{GetRestaurants, Order, OrderContent, PushNotification, SocketMessage};
+use common::protocol::{
+    GetRestaurants, Location, Order, OrderContent, PushNotification, SocketMessage,
+};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use std::io;
@@ -15,6 +17,7 @@ use tokio_stream::wrappers::LinesStream;
 struct Customer {
     tcp_sender: Addr<TcpSender>,
     logger: Logger,
+    location: Location,
 }
 
 impl Actor for Customer {
@@ -31,14 +34,18 @@ pub struct Stop;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct ChooseRestaurant(pub String);
+pub struct ChooseRestaurant {
+    pub restaurant: String,
+}
 
 #[async_handler]
 impl Handler<Start> for Customer {
     type Result = ();
 
     async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
-        _ctx.address().do_send(GetRestaurants);
+        _ctx.address().do_send(GetRestaurants {
+            customer_location: self.location,
+        });
     }
 }
 
@@ -56,10 +63,9 @@ impl Handler<Stop> for Customer {
 impl Handler<GetRestaurants> for Customer {
     type Result = ();
 
-    async fn handle(&mut self, _msg: GetRestaurants, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, msg: GetRestaurants, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Getting Restaurants");
-
-        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants) {
+        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(msg.customer_location)) {
             self.logger.error(&e.to_string());
         }
     }
@@ -70,7 +76,7 @@ impl Handler<ChooseRestaurant> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: ChooseRestaurant, _ctx: &mut Self::Context) -> Self::Result {
-        let restaurants = match serde_json::from_str::<Vec<String>>(&msg.0) {
+        let restaurants = match serde_json::from_str::<Vec<String>>(&msg.restaurant) {
             Ok(restaurants) => restaurants,
             Err(e) => {
                 self.logger
@@ -91,7 +97,7 @@ impl Handler<ChooseRestaurant> for Customer {
 
         let amount = 500_f64;
         let order = OrderContent::new(chosen_restaurant, amount);
-        _ctx.address().do_send(Order(order));
+        _ctx.address().do_send(Order { order });
     }
 }
 
@@ -100,14 +106,12 @@ impl Handler<Order> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: Order, _ctx: &mut Self::Context) -> Self::Result {
-        let order = msg.0;
-
         self.logger.debug(&format!(
             "I will order {} from {}",
-            order.amount, order.restaurant
+            msg.order.amount, msg.order.restaurant
         ));
 
-        let msg = SocketMessage::Order(order);
+        let msg = SocketMessage::Order(msg.order);
 
         if let Err(e) = self.send_message(&msg) {
             self.logger.error(&e.to_string());
@@ -120,8 +124,10 @@ impl Handler<PushNotification> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: PushNotification, _ctx: &mut Self::Context) -> Self::Result {
-        let notification = msg.0;
-        self.logger.info(notification.as_str());
+        self.logger.info(&format!(
+            "Update received: {}",
+            msg.notification_msg.as_str()
+        ));
     }
 }
 
@@ -131,14 +137,16 @@ impl Customer {
         let parsed_line = serde_json::from_str(&line_read);
         match parsed_line {
             Ok(message) => match message {
-                SocketMessage::GetRestaurants => {
-                    ctx.address().do_send(GetRestaurants);
+                SocketMessage::GetRestaurants(location) => {
+                    ctx.address().do_send(GetRestaurants {
+                        customer_location: location,
+                    });
                 }
-                SocketMessage::Restaurants(data) => {
-                    ctx.address().do_send(ChooseRestaurant(data));
+                SocketMessage::Restaurants(restaurant) => {
+                    ctx.address().do_send(ChooseRestaurant { restaurant });
                 }
-                SocketMessage::PushNotification(data) => {
-                    ctx.address().do_send(PushNotification(data));
+                SocketMessage::PushNotification(notification_msg) => {
+                    ctx.address().do_send(PushNotification { notification_msg });
                 }
                 _ => {
                     self.logger
@@ -162,7 +170,9 @@ impl Customer {
         };
 
         // sending message
-        if let Err(e) = self.tcp_sender.try_send(TcpMessage(msg_to_send + "\n")) {
+        if let Err(e) = self.tcp_sender.try_send(TcpMessage {
+            data: msg_to_send + "\n",
+        }) {
             return Err(format!("Failed to write to stream: {}", e));
         }
 
@@ -213,10 +223,12 @@ async fn main() -> io::Result<()> {
         }
         .start();
 
-        logger.debug("Created CustomerGateway");
+        logger.debug("Created Customer");
+        let customer_location = Location::new(10, 10);
         Customer {
             tcp_sender,
             logger: Logger::new(Some("[CUSTOMER]")),
+            location: customer_location,
         }
     });
 

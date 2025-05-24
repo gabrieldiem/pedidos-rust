@@ -23,7 +23,7 @@ impl Handler<TcpMessage> for TcpSender {
 
         let ret_write = async move {
             write_stream
-                .write_all(msg.0.as_bytes())
+                .write_all(msg.data.as_bytes())
                 .await
                 .expect("should have sent");
             write_stream
