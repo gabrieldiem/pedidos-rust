@@ -179,35 +179,3 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
         }
     }
 }
-
-// #[async_handler]
-// impl Handler<CheckRiderArrival> for ConnectionManager {
-//     type Result = ();
-//
-//     async fn handle(&mut self, msg: CheckRiderArrival, _ctx: &mut Self::Context) -> Self::Result {
-//         match self.orders_in_process.get(&msg.rider_id) {
-//             Some(customer_id) => {
-//                 match self.customers.get(customer_id) {
-//                     Some(customer_data) => {
-//                         let rider_location = msg.rider_location;
-//
-//                         if customer_data.location.x == rider_location.x
-//                             && customer_data.location.y == rider_location.y
-//                         {
-//                             customer_data.address.do_send(PushNotification {
-//                                 notification_msg: "Rider arrived, get out to receive your order"
-//                                     .to_owned(),
-//                             });
-//                         }
-//                     }
-//                     None => {
-//                         self.logger.warn("Failed finding customer by order");
-//                     }
-//                 };
-//             }
-//             None => {
-//                 self.logger.warn("Failed to find order in progress");
-//             }
-//         };
-//     }
-// }
