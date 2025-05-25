@@ -169,7 +169,7 @@ Proceso de delivery:
 
 #### Estado interno
 
-Está modelado como un actor con handlers asíncronos para manejar la concurrencia.
+Está modelado como un actor con handlers asíncronos para manejar la concurrencia. Utiliza TCP para la comunicación por la red.
 
 **Variables internas de `Customer`:**
 
@@ -189,7 +189,7 @@ Aplicación que utiliza el rider para actualizar su ubicación al PedidosRust, r
 
 #### Estado interno
 
-Está modelado como un actor con handlers asíncronos para manejar la concurrencia.
+Está modelado como un actor con handlers asíncronos para manejar la concurrencia. Utiliza TCP para la comunicación por la red.
 
 **Variables internas de `Rider`:**
 
@@ -219,7 +219,7 @@ Se entiende al payment gateway como un servicio externo de terceros, como podrí
 
 #### Estado interno
 
-Está modelado con tareas asíncronas para manejar la concurrencia.
+Está modelado con tareas asíncronas para manejar la concurrencia. Utiliza TCP para la comunicación por la red.
 
 **Variables internas de `Payment`:**
 
