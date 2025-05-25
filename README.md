@@ -93,6 +93,12 @@ cargo run -p rider
 
 ## Diseño
 
+### Application level
+
+<p align="center">
+    <img src="./docs/imgs/c4_app_level.png" alt="PedidosRust logo" height="800px">
+</p>
+
 ### PedidosRust
 
 ### Customer
