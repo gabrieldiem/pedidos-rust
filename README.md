@@ -230,4 +230,6 @@ struct Payment {
 }
 ```
 
-### <ins>Mensajes</ins>
+## Mensajes
+
+## Resiliencia distribuida
