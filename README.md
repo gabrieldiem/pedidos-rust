@@ -16,12 +16,12 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 
 ### Integrantes
 
-| Nombre               | Padrón | Email           |
-| -------------------- | ------ | --------------- |
-| Avalos, Victoria     | 108434 | -               |
-| Chacón, Ignacio      |        | -               |
-| Diem, Walter Gabriel | 105618 | wdiem@fi.uba.ar |
-| Funes, Nicolas       |        | -               |
+| Nombre               | Padrón | Email             |
+| -------------------- | ------ |-------------------|
+| Avalos, Victoria     | 108434 | vavalos@fi.uba.ar |
+| Chacón, Ignacio      |        | -                 |
+| Diem, Walter Gabriel | 105618 | wdiem@fi.uba.ar   |
+| Funes, Nicolas       |        | -                 |
 
 ---
 
@@ -206,6 +206,8 @@ struct Rider {
 ### <ins>Restaurant</ins>
 
 #### Finalidad
+
+Aplicación que utilizan los restaurantes para recibir pedidos de los comensales, notificar cuando los comienza a preparar y cuando el pedido está listo para ser retirado por el rider. El restaurante puede cancelar un pedido por falta de stock con una probabilidad aleatoria del 10% (simulando que el stock se agota en el momento de la preparación).
 
 #### Estado interno
 
