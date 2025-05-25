@@ -102,6 +102,7 @@ impl Handler<FindRider> for ConnectionManager {
 
     async fn handle(&mut self, msg: FindRider, _ctx: &mut Self::Context) -> Self::Result {
         // any rider will do
+        // TODO: bug when connecting multiple riders, given that only one is gotten
         match self.riders.values().find(|_rider| true) {
             Some(found_rider) => match self.customers.get(&msg.customer_id) {
                 Some(customer) => {

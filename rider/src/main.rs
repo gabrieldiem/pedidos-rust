@@ -145,7 +145,7 @@ impl Handler<DeliveryOffer> for Rider {
 
     async fn handle(&mut self, msg: DeliveryOffer, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Got DeliveryOffer");
-        let will_accept = true; // can be changed to random afterward
+        let will_accept = true; // TODO: can be changed to random afterward
 
         if will_accept && !self.busy {
             self.logger.debug(&format!(
@@ -161,6 +161,9 @@ impl Handler<DeliveryOffer> for Rider {
                 self.logger.error(&e.to_string());
                 return;
             }
+
+            // TODO: needs logic to handle when multiple riders accept the offer
+            // TODO: needs to handle rejection
             _ctx.address().do_send(GoToCustomerLocation);
         }
     }

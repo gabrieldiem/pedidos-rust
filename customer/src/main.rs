@@ -148,11 +148,6 @@ impl Customer {
         let parsed_line = serde_json::from_str(&line_read);
         match parsed_line {
             Ok(message) => match message {
-                SocketMessage::GetRestaurants(location) => {
-                    ctx.address().do_send(GetRestaurants {
-                        customer_location: location,
-                    });
-                }
                 SocketMessage::Restaurants(restaurant) => {
                     ctx.address().do_send(ChooseRestaurant { restaurant });
                 }
