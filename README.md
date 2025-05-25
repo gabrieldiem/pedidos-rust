@@ -17,7 +17,7 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 ### Integrantes
 
 | Nombre               | Padrón | Email             |
-| -------------------- | ------ |-------------------|
+| -------------------- | ------ | ----------------- |
 | Avalos, Victoria     | 108434 | vavalos@fi.uba.ar |
 | Chacón, Ignacio      |        | -                 |
 | Diem, Walter Gabriel | 105618 | wdiem@fi.uba.ar   |
@@ -118,6 +118,12 @@ La estructura de la app consta de una entidad `Server` que es dueña del welcomm
 
 <p align="center">
     <img src="./docs/imgs/pedidos_rust_app.png" alt="pedidos_rust_app" height="500px">
+</p>
+
+En una situación donde hay sólo 1 customer y 1 rider conectados al PedidosRust, los actores presentes serían:
+
+<p align="center">
+    <img src="./docs/imgs/pedidos_rust_app_1_customer_1_rider.png" alt="pedidos_rust_app_1_customer_1_rider" height="400px">
 </p>
 
 **Variables internas de `Server`:**
