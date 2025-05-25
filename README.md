@@ -120,7 +120,7 @@ La estructura de la app consta de una entidad `Server` que es dueña del welcomm
     <img src="./docs/imgs/pedidos_rust_app.png" alt="pedidos_rust_app" height="500px">
 </p>
 
-**Estado interno de `Server`:**
+**Variables internas de `Server`:**
 
 ```rust
 pub struct Server {
@@ -129,7 +129,7 @@ pub struct Server {
 }
 ```
 
-**Estado interno de `ClientConnection`:**
+**Variables internas de `ClientConnection`:**
 
 ```rust
 pub struct ClientConnection {
@@ -141,7 +141,7 @@ pub struct ClientConnection {
 }
 ```
 
-**Estado interno de `ConnectionManager`:**
+**Variables internas de `ConnectionManager`:**
 
 ```rust
 pub struct ConnectionManager {
@@ -171,7 +171,7 @@ Proceso de delivery:
 
 Está modelado como un actor con handlers asíncronos para manejar la concurrencia.
 
-**Estado interno de `Customer`:**
+**Variables internas de `Customer`:**
 
 ```rust
 struct Customer {
@@ -191,7 +191,7 @@ Aplicación que utiliza el rider para actualizar su ubicación al PedidosRust, r
 
 Está modelado como un actor con handlers asíncronos para manejar la concurrencia.
 
-**Estado interno de `Rider`:**
+**Variables internas de `Rider`:**
 
 ```rust
 struct Rider {
