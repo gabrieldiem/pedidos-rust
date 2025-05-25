@@ -1,7 +1,8 @@
 mod cliente_restaurante_de_juguete;
 
+use common::constants::{MAX_ORDER_DURATION, MIN_ORDER_DURATION};
 use common::utils::logger::Logger;
-use rand::random;
+use rand::{Rng, random};
 use std::{error::Error, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -18,27 +19,29 @@ async fn handle_order(
 ) -> Result<(), Box<dyn Error>> {
     logger.info(&format!("Order received: {}", order));
 
+    {
+        let mut writer = writer.lock().await;
+        writer.write_all(b"OK\n").await?;
+    }
+
+    logger.info(&format!("Preparing order: {}...", order));
+    let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
+    sleep(Duration::from_secs(secs)).await;
     let accepted = random::<f32>() > 0.1;
 
-    if accepted {
-        {
-            let mut writer = writer.lock().await;
-            writer.write_all(b"OK\n").await?;
-        }
-
-        logger.info(&format!("Order accepted: {}", order));
-        sleep(Duration::from_secs(2)).await;
-        logger.info(&format!("Order {} is ready", order));
-
-        let respuesta = format!("Order '{}' is ready\n", order);
-        {
-            let mut writer = writer.lock().await;
-            writer.write_all(respuesta.as_bytes()).await?;
-        }
-    } else {
+    if !accepted {
+        logger.info(&format!("Order {} rejected due to lack of stock", order));
         let mut writer = writer.lock().await;
         writer.write_all(b"REJECTED\n").await?;
-        logger.info(&format!("Order rejected due to lack os stock: {}", order));
+        return Ok(());
+    }
+
+    logger.info(&format!("Order {} is ready", order));
+
+    let respuesta = format!("Order '{}' is ready\n", order);
+    {
+        let mut writer = writer.lock().await;
+        writer.write_all(respuesta.as_bytes()).await?;
     }
 
     Ok(())
