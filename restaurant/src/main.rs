@@ -1,61 +1,71 @@
 mod cliente_restaurante_de_juguete;
 
 use rand::random;
-use std::time::Duration;
+use std::{error::Error, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::{TcpListener, TcpStream},
+    net::TcpListener,
+    sync::Mutex,
     time::sleep,
 };
 
-async fn manejar_conexion(socket: TcpStream) -> anyhow::Result<()> {
-    let (reader, mut writer) = socket.into_split();
-    let mut reader = BufReader::new(reader);
-    let mut buffer = String::new();
+//TODO: implementar un protocolo entre pedidos rust y restaurente. Esto sigue siendo de juguete
+async fn handle_order(
+    pedido: String,
+    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+) -> Result<(), Box<dyn Error>> {
+    println!("Order received: {}", pedido);
 
-    let n = reader.read_line(&mut buffer).await?;
-    if n == 0 {
-        return Ok(()); // conexión cerrada
-    }
+    let accepted = random::<f32>() > 0.1;
 
-    let pedido = buffer.trim();
-    println!("Pedido recibido: {}", pedido);
+    if accepted {
+        {
+            let mut writer = writer.lock().await;
+            writer.write_all(b"OK\n").await?;
+        }
 
-    let aceptado = random::<f32>() > 0.1;
+        println!("Order accepted: {}", pedido);
+        sleep(Duration::from_secs(2)).await;
+        println!("Order is ready: {}", pedido);
 
-    if aceptado {
-        writer.write_all(b"OK\n").await?;
-        println!("Pedido aceptado: {}", pedido);
-        sleep(Duration::from_secs(2)).await; // Quizás debería ser un random
-        // Puede ser rechazado luego de haber sido aceptado? Si es así iría acá
-        println!("Pedido listo: {}", pedido);
-        let respuesta = format!("Pedido '{}' listo\n", pedido);
-        writer.write_all(respuesta.as_bytes()).await?;
+        let respuesta = format!("Order '{}' is ready\n", pedido);
+        {
+            let mut writer = writer.lock().await;
+            writer.write_all(respuesta.as_bytes()).await?;
+        }
     } else {
-        writer.write_all(b"RECHAZADO\n").await?;
-        println!("Pedido rechazado: {}", pedido);
+        let mut writer = writer.lock().await;
+        writer.write_all(b"REJECTED\n").await?;
+        println!("Order rejected: {}", pedido);
     }
 
     Ok(())
 }
 
-/*
-* Recibe constantemente conexiones TCP (van a ser pedidos, TODO implementar un protocolo que verifique esto).
-* Por cada pedido se levanta una nueva async task. No se bloquea el hilo principal gracias al funcionamiento de las async tasks,
-* y se pueden atender múltiples pedidos al mismo tiempo.
-
-*/
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() -> Result<(), Box<dyn Error>> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("Restaurante escuchando en 127.0.0.1:8080...");
+    println!("Restaurante listening on 127.0.0.1:8080...");
 
-    loop {
-        let (socket, _) = listener.accept().await?;
+    let (socket, _) = listener.accept().await?;
+    println!("Connection established with {:?}", socket.peer_addr()?);
+
+    let (reader, writer) = socket.into_split();
+    let reader = BufReader::new(reader);
+    let writer = Arc::new(Mutex::new(writer));
+    let mut lines = reader.lines();
+
+    while let Some(line) = lines.next_line().await? {
+        let order = line.trim().to_string();
+        let writer_clone = Arc::clone(&writer);
+
         tokio::spawn(async move {
-            if let Err(e) = manejar_conexion(socket).await {
-                eprintln!("Error al manejar conexión: {:?}", e);
+            if let Err(e) = handle_order(order, writer_clone).await {
+                eprintln!("Error al manejar pedido: {:?}", e);
             }
         });
     }
+
+    println!("Connection closed by client");
+    Ok(())
 }
