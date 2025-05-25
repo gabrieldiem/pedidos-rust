@@ -2,16 +2,8 @@
 
 Para información sobre setup del proyecto ver el documento [`./docs/contribute.md`](./docs/contribute.md).
 
-### Integrantes
-
-| Nombre              | Padrón |
-|---------------------|--------|
-| Victoria Avalos     | 108434 |
-| Walter Gabriel Diem |        |
-| Nicolas Funes       |        |
-| Ignacio Chacón      |        |
-
 ---
+
 # PedidosRust - Grupo MutexMasters
 
 <p align="center">
@@ -22,10 +14,21 @@ PedidosRust es una nueva aplicación para conectar restaurantes, repartidores y 
 
 Los comensales podrán solicitar un pedido a un restaurante, los restaurantes notifican cuando el pedido está listo, y los repartidores buscan pedidos cercanos y los entregan.
 
+### Integrantes
+
+| Nombre               | Padrón |
+| -------------------- | ------ |
+| Avalos, Victoria     | 108434 |
+| Chacón, Ignacio      |        |
+| Diem, Walter Gabriel | 105618 |
+| Funes, Nicolas       |        |
+
 ---
+
 ## Uso
 
 ---
+
 ## Diseño
 
 ### PedidosRust
