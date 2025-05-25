@@ -221,6 +221,8 @@ Se entiende al payment gateway como un servicio externo de terceros, como podrí
 
 Está modelado con tareas asíncronas para manejar la concurrencia.
 
+**Variables internas de `Payment`:**
+
 ```rust
 struct Payment {
     tcp_sender: Addr<TcpSender>,
