@@ -31,11 +31,11 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 1. [Estructura del repositorio y sistema](#Estructura-del-repositorio-y-sistema)
 1. [Uso](#Uso)
 1. [Diseño](#Diseño)
-    1. [Pedidos-rust](#Pedidos-rust)
-    1. [Customer](#Customer)
-    1. [Rider](#Rider)
-    1. [Restaurant](#Restaurant)
-    1. [Payment](#Payment)
+   1. [Pedidos-rust](#Pedidos-rust)
+   1. [Customer](#Customer)
+   1. [Rider](#Rider)
+   1. [Restaurant](#Restaurant)
+   1. [Payment](#Payment)
 1. [Mensajes](#Mensajes)
 
 ## Aplicaciones
@@ -185,7 +185,7 @@ struct Customer {
 
 #### Finalidad
 
-Aplicación que utiliza el rider para actualizar su ubicación al PedidosRust, recibir ofertas de deliveries (se le dice *oferta* porque PedidosRust ofrece a los riders la posibilidad de realizar un delivery, el rider puede aceptar o no, y PedidosRust confirma si el rider fue elegido como el que efectivamente va a realizar el envío), ir a retirar el pedido del restaurante para llevarle al customer, y viajar hasta la ubicación del customer para realizar la entrega del pedido.
+Aplicación que utiliza el rider para actualizar su ubicación al PedidosRust, recibir ofertas de deliveries (se le dice _oferta_ porque PedidosRust ofrece a los riders la posibilidad de realizar un delivery, el rider puede aceptar o no, y PedidosRust confirma si el rider fue elegido como el que efectivamente va a realizar el envío), ir a retirar el pedido del restaurante para llevarle al customer, y viajar hasta la ubicación del customer para realizar la entrega del pedido.
 
 #### Estado interno
 
@@ -209,20 +209,23 @@ struct Rider {
 
 #### Estado interno
 
-
-
 ### <ins>Payment</ins>
 
 #### Finalidad
 
+Aplicación que autoriza y efectiviza un cobro. El flujo de un pago consta de dos fases secuenciales: primero se autoriza el pago y luego se efectiviza el cobro. La primera fase (la autorización del pago) puede fallar debido a un rechazo. Pero la efectivización del mismo (debitar el dinero) se realiza sin posibilidad de falla.
+
+Se entiende al payment gateway como un servicio externo de terceros, como podría ser Visa o MasterCard.
+
 #### Estado interno
 
+Está modelado con tareas asíncronas para manejar la concurrencia.
 
+```rust
+struct Payment {
+    tcp_sender: Addr<TcpSender>,
+    logger: Logger,
+}
+```
 
 ### <ins>Mensajes</ins>
-
-#### Finalidad
-
-#### Estado interno
-
-
