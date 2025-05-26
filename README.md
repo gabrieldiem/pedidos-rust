@@ -16,12 +16,12 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 
 ### Integrantes
 
-| Nombre               | Padrón | Email             |
-| -------------------- | ------ | ----------------- |
-| Avalos, Victoria     | 108434 | vavalos@fi.uba.ar |
-| Chacón, Ignacio      |        | -                 |
-| Diem, Walter Gabriel | 105618 | wdiem@fi.uba.ar   |
-| Funes, Nicolas       |        | -                 |
+| Nombre                            | Padrón | Email             |
+| --------------------              | ------ | ----------------- |
+| Avalos, Victoria                  | 108434 | vavalos@fi.uba.ar |
+| Chacón, Ignacio                   |        | -                 |
+| Diem, Walter Gabriel              | 105618 | wdiem@fi.uba.ar   |
+| Funes Cabanelas, Nicolás Ezequiel | 109830 | nfunes@fi.uba.ar  |
 
 ---
 
