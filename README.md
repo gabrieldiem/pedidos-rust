@@ -37,6 +37,7 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
    1. [Restaurant](#Restaurant)
    1. [Payment](#Payment)
 1. [Mensajes](#Mensajes)
+1. [Resiliencia distribuida](#Resiliencia-distribuida)
 
 ## Aplicaciones
 
