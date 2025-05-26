@@ -217,6 +217,18 @@ Aplicación que utilizan los restaurantes para recibir pedidos de los comensales
 
 #### Estado interno
 
+Está modelado con tareas asíncronas de tokio para manejar los pedidos concurrentemente, asignando cada pedido a una tarea asíncrona.
+Se comunica con PedidosRust mediante TCP para recibir los pedidos y contestar.
+
+**Variables internas de `Restaurant`:**
+
+```rust
+struct Payment {
+    tcp_sender: Addr<TcpSender>,
+    location: Location
+}
+```
+
 ### <ins>Payment</ins>
 
 #### Finalidad

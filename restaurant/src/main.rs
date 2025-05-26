@@ -27,6 +27,7 @@ async fn handle_order(
     logger.info(&format!("Preparing order: {}...", order));
     let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
     sleep(Duration::from_secs(secs)).await;
+
     let accepted = random::<f32>() > 0.1;
 
     if !accepted {
