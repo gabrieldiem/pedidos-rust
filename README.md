@@ -256,7 +256,7 @@ struct Payment {
 Se presentan los mensajes que intercambian las aplicaciones para poder llevar a cabo el envío de pedidos de manera efectiva y resiliente:
 
 | Mensaje                | Emisor                 | Receptor               | Payload                                                              | Propósito                                                                   |
-| ---------------------- | ---------------------- | ---------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| ---------------------- | ---------------------- | ---------------------- |----------------------------------------------------------------------| --------------------------------------------------------------------------- |
 | Get Restaurants         | Customer👨🏻‍🦱             | PedidosRust🦀          | `customer_location: Location` (`Location` son dos enteros `x` e `y`) | Solicitar restaurantes para realizar un pedido                              |
 | Restaurants            | PedidosRust🦀          | Customer👨🏻‍🦱             | `data: String`                                                       | Comunicar los restaurantes disponibles                                      |
 | Order                  | Customer👨🏻‍🦱             | PedidosRust🦀          | `restaurant: String, amount: f64`                                    | Realizar un pedido                                                          |
@@ -273,7 +273,7 @@ Se presentan los mensajes que intercambian las aplicaciones para poder llevar a 
 | Payment Denied          | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago no se pudo autorizar                                   |
 | Execute Payment         | PedidosRust🦀          | Payment 💲             | `customer_id: u32, amount: f64`                                      | Debitar/efectivizar el pago                                                 |
 | Payment Executed        | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el débito del pago fue exitoso                                 |
-| Prepare Order           | PedidosRust🦀          | Restaurant🍴           | `customer_id: u32`                                                   | Preparar orden para un customer                                             |
+| Prepare Order           | PedidosRust🦀          | Restaurant🍴           | `customer_id: u32, price: u64`                                       | Preparar orden para un customer                                             |
 | Order In Progress        | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Comenzar a preparar orden                                                   |
 | Order Cancelled         | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Cancelar orden                                                              |
 | Order Ready             | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Informar que la orden está lista para ser retirada                          |
