@@ -245,11 +245,12 @@ struct Payment {
 | GetRestaurants         | Customer👨🏻‍🦱    | PedidosRust🦀 | `customer_location: Location` (`Location` son dos enteros `x` e `y`) | Solicitar restaurantes para realizar un pedido                              |
 | Restaurants            | PedidosRust🦀 | Customer👨🏻‍🦱    | `data: String`                                                       | Comunicar los restaurantes disponibles                                      |
 | Order                  | Customer👨🏻‍🦱    | PedidosRust🦀 | `restaurant: String, amount: f64`                                    | Realizar un pedido                                                          |
-| PushNotification       | PedidosRust🦀 | Customer👨🏻‍🦱    | `notification_msg: String`                                           | Envío de información imprimible para información el estado del pedido       |
+| PushNotification       | PedidosRust🦀 | Customer👨🏻‍🦱    | `notification_msg: String`                                           | Envío de información para seguimiento en tiempo real del estado del pedido  |
 | LocationUpdate         | Rider🛵       | PedidosRust🦀 | `new_location: Location`                                             | Informar nueva ubicación                                                    |
 | DeliveryOffer          | PedidosRust🦀 | Rider🛵       | `customer_id: u32, customer_location: Location`                      | Ofrecer un pedido al rider que puede aceptar o no                           |
 | DeliveryOfferAccepted  | Rider🛵       | PedidosRust🦀 | `customer_id: u32, customer_location: Location`                      | Aceptar el ofrecimiento de pedido                                           |
 | DeliveryOfferConfirmed | PedidosRust🦀 | Rider🛵       | `customer_id: u32, customer_location: Location`                      | Confirmar que el rider es el elegido para hacer el delivery                 |
+| PickedUpFromRestaurant | Rider🛵       | PedidosRust🦀 | `rider_id: u32`                                                      | Informar que el rider ya hizo el retiro de la orden del restaurante         |
 | DeliveryDone           | Rider🛵       | PedidosRust🦀 | `rider_id: u32`                                                      | Informar que el rider llegó a la ubicación del customer y entregó el pedido |
 | FinishDelivery         | PedidosRust🦀 | Customer👨🏻‍🦱    |                                                                      | Realizar última actualización del pedido para marcar que se                 |
 | AuthorizePayment       | PedidosRust🦀 | Payment 💲    | `customer_id: u32, amount: f64`                                      | Solicitar la autorización del pago                                          |
@@ -261,7 +262,7 @@ struct Payment {
 | OrderInProgress        | Restaurant🍴  | PedidosRust🦀 | `customer_id: u32`                                                   | Comenzar a preparar orden                                                   |
 | OrderCancelled         | Restaurant🍴  | PedidosRust🦀 | `customer_id: u32`                                                   | Cancelar orden                                                              |
 | OrderReady             | Restaurant🍴  | PedidosRust🦀 | `customer_id: u32`                                                   | Informar que la orden está lista para ser retirada                          |
-| DriverAssigned         | PedidosRust🦀 | Restaurant🍴  | `rider_id: u32`                                                      | Informar que el rider con ID proveída se encargará del envío                |
+| RiderAssigned          | PedidosRust🦀 | Restaurant🍴  | `rider_id: u32`                                                      | Informar que el rider con ID proveída se encargará del envío                |
 
 A nivel actores, todos poseen un automensaje `Start`, que se envía al comienzo de su ejecución, y `Stop` para marcar la finalización de su ejecución.
 
