@@ -1,6 +1,8 @@
 mod cliente_restaurante_de_juguete;
 
-use rand::random;
+use common::constants::{MAX_ORDER_DURATION, MIN_ORDER_DURATION};
+use common::utils::logger::Logger;
+use rand::{Rng, random};
 use std::{error::Error, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
@@ -11,32 +13,35 @@ use tokio::{
 
 //TODO: implementar un protocolo entre pedidos rust y restaurente. Esto sigue siendo de juguete
 async fn handle_order(
-    pedido: String,
+    order: String,
     writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    logger: Logger,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Order received: {}", pedido);
+    logger.info(&format!("Order received: {}", order));
 
+    {
+        let mut writer = writer.lock().await;
+        writer.write_all(b"OK\n").await?;
+    }
+
+    logger.info(&format!("Preparing order: {}...", order));
+    let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
+    sleep(Duration::from_secs(secs)).await;
     let accepted = random::<f32>() > 0.1;
 
-    if accepted {
-        {
-            let mut writer = writer.lock().await;
-            writer.write_all(b"OK\n").await?;
-        }
-
-        println!("Order accepted: {}", pedido);
-        sleep(Duration::from_secs(2)).await;
-        println!("Order is ready: {}", pedido);
-
-        let respuesta = format!("Order '{}' is ready\n", pedido);
-        {
-            let mut writer = writer.lock().await;
-            writer.write_all(respuesta.as_bytes()).await?;
-        }
-    } else {
+    if !accepted {
+        logger.info(&format!("Order {} rejected due to lack of stock", order));
         let mut writer = writer.lock().await;
         writer.write_all(b"REJECTED\n").await?;
-        println!("Order rejected: {}", pedido);
+        return Ok(());
+    }
+
+    logger.info(&format!("Order {} is ready", order));
+
+    let respuesta = format!("Order '{}' is ready\n", order);
+    {
+        let mut writer = writer.lock().await;
+        writer.write_all(respuesta.as_bytes()).await?;
     }
 
     Ok(())
@@ -44,11 +49,17 @@ async fn handle_order(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let logger = Logger::new(Some("[RESTAURANT]"));
+    logger.info("Starting...");
+
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("Restaurante listening on 127.0.0.1:8080...");
+    logger.info("Restaurante listening on 127.0.0.1:8080..");
 
     let (socket, _) = listener.accept().await?;
-    println!("Connection established with {:?}", socket.peer_addr()?);
+    logger.info(&format!(
+        "Connection established with {}",
+        socket.peer_addr()?
+    ));
 
     let (reader, writer) = socket.into_split();
     let reader = BufReader::new(reader);
@@ -60,8 +71,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let writer_clone = Arc::clone(&writer);
 
         tokio::spawn(async move {
-            if let Err(e) = handle_order(order, writer_clone).await {
-                eprintln!("Error al manejar pedido: {:?}", e);
+            if let Err(e) =
+                handle_order(order, writer_clone, Logger::new(Some("[RESTAURANT]"))).await
+            {
+                eprintln!("Error handling order: {:?}", e);
             }
         });
     }
