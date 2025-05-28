@@ -296,9 +296,11 @@ Para garantizar la resiliencia del sistema distribuido, se tomarán dos medidas:
 
 ### PedidosRust resistente a caídas
 
-En primer lugar, PedidosRust contará con réplicas del proceso original que estarán a la espera de que el proceso **coordinador** deje de poder responder a peticiones externas. Cuanto esto pase, se llamará a elecciones internas mediante un *algoritmo de elección distribuido* de tipo *bully* entre las réplicas para decidir el próximo coordinador.
+En primer lugar, PedidosRust contará con réplicas del proceso original que estarán a la espera de que el proceso **coordinador** deje de poder responder a peticiones externas. Las réplicas se enterarán de esto mediande un mecanismo de *heartbeat* que envía mensajes periódicos al coordinador, utilizando UDP. Si el coordinador deja de responder a estos mensajes, las réplicas asumirán que el coordinador ha fallado.
+Cuando una réplica detecte este suceso, llamará a elecciones internas mediante un *algoritmo de elección distribuido* de tipo *bully* entre las réplicas para decidir el próximo coordinador.
+Tras la elección, el nuevo coordinador envía por UDP mensajes a todos los clientes de PedidosRust para que actualicen quién es el coordinados, y actualiza sus propias conexiones usando su estado interno.
 
-Por otro lado, con el objetivo de garantizar la integridad de datos entre las réplicas de `PedidosRust`, se implementará un algoritmo de tipo *ring* para el pasaje de datos entre las réplicas.
+Por otro lado, con el objetivo de garantizar la integridad de datos entre las réplicas de `PedidosRust` y que todas posean el mismo estado interno para que cualquiera pueda pasar a ser el nuevo líder, se implementará un algoritmo de tipo *ring* para el pasaje de datos entre las réplicas. De esta forma, cuando el coordinador recibe un mensaje de una entidad, lo procesa y envía su actualización a la réplica siguiente en el anillo. Esta réplica procesa el mensaje y lo envía a la siguiente, y así sucesivamente hasta que el mensaje regresa al coordinador.
 
 <p align="center">
     <img src="./docs/imgs/algos_distribuidos.jpeg" alt="algos_distribuidos" height="500px">
