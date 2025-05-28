@@ -253,6 +253,12 @@ struct Payment {
 
 ## Mensajes
 
+Se muestra a continuación un diagrama de secuencia que representa el flujo de mensajes entre las aplicaciones en un caso de uso exitoso donde un cliente realiza un pedido a un restaurante.
+
+<p align="center">
+    <img src="./docs/imgs/caso_feliz.png" alt="Diagrama de Secuencia" height="700px">
+</p>
+
 Se presentan los mensajes que intercambian las aplicaciones para poder llevar a cabo el envío de pedidos de manera efectiva y resiliente:
 
 | Mensaje                   | Emisor                 | Receptor               | Payload                                                              | Propósito                                                                                                           |
