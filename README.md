@@ -299,3 +299,6 @@ Por otro lado, con el objetivo de garantizar la integridad de datos entre las r�
 <p align="center">
     <img src="./docs/imgs/algos_distribuidos.jpeg" alt="algos_distribuidos" height="500px">
 </p>
+
+#### Mecanismo de pinger
+Para garantizar la detección de desconexiones de riders y restaurantes, habrá un componente “pinger” dentro del ConnectionManager. Este módulo recibe como entrada los identificadores (puertos UDP) de todos los actores que está rastreando y les envía, cada 500 ms, un paquete “ping” a través de UDP, separando así el canal de verificación de la conexión del flujo principal de mensajes TCP. Si un mismo actor deja de responder durante cinco pings consecutivos, se asume su desconexión. Una vez marcado como desconectado, el actor entra en un periodo de gracia de 40 s durante el cual puede volver a reconectarse sin pérdida de estado. Transcurrido este plazo sin respuesta, el pinger notifica al ConnectionManager que la conexión es irrecuperable y se procede a limpiar recursos asociados y a informar al resto del sistema la indisponibilidad definitiva de ese actor
