@@ -292,6 +292,10 @@ A nivel actores, todos poseen un automensaje `Start`, que se envía al comienzo 
 
 ## Resiliencia distribuida
 
+Para garantizar la resiliencia del sistema distribuido, se tomarán dos medidas: hacer que PedidosRust sea resistente a caídas, y para las demás aplicaciones, implementar un mecanismo de detección de desconexiones mediante un pinger.
+
+### PedidosRust resistente a caídas
+
 En primer lugar, PedidosRust contará con réplicas del proceso original que estarán a la espera de que el proceso **coordinador** deje de poder responder a peticiones externas. Cuanto esto pase, se llamará a elecciones internas mediante un *algoritmo de elección distribuido* de tipo *bully* entre las réplicas para decidir el próximo coordinador.
 
 Por otro lado, con el objetivo de garantizar la integridad de datos entre las réplicas de `PedidosRust`, se implementará un algoritmo de tipo *ring* para el pasaje de datos entre las réplicas.
@@ -301,4 +305,4 @@ Por otro lado, con el objetivo de garantizar la integridad de datos entre las r�
 </p>
 
 #### Mecanismo de pinger
-Para garantizar la detección de desconexiones de riders y restaurantes, habrá un componente “pinger” dentro del ConnectionManager. Este módulo recibe como entrada los identificadores (puertos UDP) de todos los actores que está rastreando y les envía, cada 500 ms, un paquete “ping” a través de UDP, separando así el canal de verificación de la conexión del flujo principal de mensajes TCP. Si un mismo actor deja de responder durante cinco pings consecutivos, se asume su desconexión. Una vez marcado como desconectado, el actor entra en un periodo de gracia de 40 s durante el cual puede volver a reconectarse sin pérdida de estado. Transcurrido este plazo sin respuesta, el pinger notifica al ConnectionManager que la conexión es irrecuperable y se procede a limpiar recursos asociados y a informar al resto del sistema la indisponibilidad definitiva de ese actor
+Para garantizar la detección de desconexiones de riders y restaurantes, habrá un componente “pinger” dentro del ConnectionManager. Este módulo recibe como entrada los identificadores (puertos UDP) de todos los actores que está rastreando y les envía, cada 500 ms, un paquete “ping” a través de UDP, separando así el canal de verificación de la conexión del flujo principal de mensajes TCP. Si un mismo actor deja de responder durante cinco pings consecutivos, se asume su desconexión. Una vez marcado como desconectado, el actor entra en un periodo de gracia de 40 s durante el cual puede volver a reconectarse sin pérdida de estado. Transcurrido este plazo sin respuesta, el pinger notifica al ConnectionManager que la conexión es irrecuperable y se procede a limpiar recursos asociados y a informar al resto del sistema la indisponibilidad definitiva de ese actor.
