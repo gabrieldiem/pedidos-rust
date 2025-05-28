@@ -16,12 +16,12 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 
 ### Integrantes
 
-| Nombre                            | Padrón | Email             |
-| --------------------              | ------ | ----------------- |
-| Avalos, Victoria                  | 108434 | vavalos@fi.uba.ar |
-| Chacón, Ignacio                   |        | -                 |
-| Diem, Walter Gabriel              | 105618 | wdiem@fi.uba.ar   |
-| Funes Cabanelas, Nicolás Ezequiel | 109830 | nfunes@fi.uba.ar  |
+| Nombre                            | Padrón | Email              |
+| --------------------              | ------ | -----------------  |
+| Avalos, Victoria                  | 108434 | vavalos@fi.uba.ar  |
+| Chacón, Ignacio                   | 108298 | ichacons@fi.uba.ar |
+| Diem, Walter Gabriel              | 105618 | wdiem@fi.uba.ar    |
+| Funes Cabanelas, Nicolás Ezequiel | 109830 | nfunes@fi.uba.ar   |
 
 ---
 
@@ -291,3 +291,11 @@ Se presentan los mensajes que intercambian las aplicaciones para poder llevar a 
 A nivel actores, todos poseen un automensaje `Start`, que se envía al comienzo de su ejecución, y `Stop` para marcar la finalización de su ejecución.
 
 ## Resiliencia distribuida
+
+En primer lugar, PedidosRust contará con réplicas del proceso original que estarán a la espera de que el proceso **coordinador** deje de poder responder a peticiones externas. Cuanto esto pase, se llamará a elecciones internas mediante un *algoritmo de elección distribuido* de tipo *bully* entre las réplicas para decidir el próximo coordinador.
+
+Por otro lado, con el objetivo de garantizar la integridad de datos entre las réplicas de `PedidosRust`, se implementará un algoritmo de tipo *ring* para el pasaje de datos entre las réplicas.
+
+<p align="center">
+    <img src="./docs/imgs/algos_distribuidos.jpeg" alt="algos_distribuidos" height="500px">
+</p>
