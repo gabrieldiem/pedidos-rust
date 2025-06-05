@@ -76,7 +76,7 @@ cargo run -p customer
 **Payment:**
 
 ```bash
-cargo run -p payment
+cargo run -p payment-system
 ```
 
 **Pedidos-rust:**

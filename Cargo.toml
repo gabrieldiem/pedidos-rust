@@ -1,3 +1,3 @@
 [workspace]
 resolver="3"
-members = ["common", "customer", "payment", "pedidos-rust", "restaurant", "rider"]
+members = ["common", "customer", "payment-system", "pedidos-rust", "restaurant", "rider"]
