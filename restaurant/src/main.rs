@@ -1,32 +1,29 @@
-mod cliente_restaurante_de_juguete;
-
-use common::constants::{MAX_ORDER_DURATION, MIN_ORDER_DURATION};
+use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_DURATION, MIN_ORDER_DURATION};
 use common::utils::logger::Logger;
 use rand::{Rng, random};
 use std::{error::Error, sync::Arc, time::Duration};
+use tokio::net::TcpStream;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::TcpListener,
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, split},
     sync::Mutex,
-    time::sleep,
 };
 
 //TODO: implementar un protocolo entre pedidos rust y restaurente. Esto sigue siendo de juguete
 async fn handle_order(
     order: String,
-    writer: Arc<Mutex<tokio::net::tcp::OwnedWriteHalf>>,
+    writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
     logger: Logger,
 ) -> Result<(), Box<dyn Error>> {
     logger.info(&format!("Order received: {}", order));
 
     {
         let mut writer = writer.lock().await;
-        writer.write_all(b"OK\n").await?;
+        writer.write_all(b"PREPARING\n").await?;
     }
 
     logger.info(&format!("Preparing order: {}...", order));
     let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
-    sleep(Duration::from_secs(secs)).await;
+    tokio::time::sleep(Duration::from_secs(secs)).await;
 
     let accepted = random::<f32>() > 0.1;
 
@@ -38,7 +35,6 @@ async fn handle_order(
     }
 
     logger.info(&format!("Order {} is ready", order));
-
     let respuesta = format!("Order '{}' is ready\n", order);
     {
         let mut writer = writer.lock().await;
@@ -53,18 +49,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[RESTAURANT]"));
     logger.info("Starting...");
 
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    logger.info("Restaurante listening on 127.0.0.1:8080..");
+    let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
+    let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
 
-    let (socket, _) = listener.accept().await?;
-    logger.info(&format!(
-        "Connection established with {}",
-        socket.peer_addr()?
-    ));
+    logger.info(&format!("Using address {}", stream.local_addr()?));
+    logger.info(&format!("Connected to server {}", server_sockeaddr_str));
 
-    let (reader, writer) = socket.into_split();
-    let reader = BufReader::new(reader);
-    let writer = Arc::new(Mutex::new(writer));
+    let (reader_half, writer_half) = split(stream);
+    let writer = Arc::new(Mutex::new(writer_half));
+    let reader = BufReader::new(reader_half);
     let mut lines = reader.lines();
 
     while let Some(line) = lines.next_line().await? {
