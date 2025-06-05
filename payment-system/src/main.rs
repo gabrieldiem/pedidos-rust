@@ -1,4 +1,6 @@
-use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT, PAYMENT_REJECTED_PROBABILITY};
+use common::constants::{
+    DEFAULT_PR_HOST, DEFAULT_PR_PORT, PAYMENT_DURATION, PAYMENT_REJECTED_PROBABILITY,
+};
 use common::utils::logger::Logger;
 use rand::random;
 use std::{error::Error, sync::Arc};
@@ -8,45 +10,33 @@ use tokio::{
     sync::Mutex,
 };
 
-//TODO: implementar un protocolo para el payment system
-async fn handle_request(
-    order: String,
+//TODO: implementar un protocolo entre pedidos rust y el sistema de pagos
+async fn execute_authorization(
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
     logger: Logger,
-) -> Result<(), Box<dyn Error>> {
-    logger.info(&format!("Request received: {}", order));
-
-    if order.to_uppercase().contains("AUTORIZAR") {
-        let writer_clone = Arc::clone(&writer);
-        let logger_clone = logger.clone();
-        tokio::spawn(async move {
-            let autorizado = random::<f32>() > PAYMENT_REJECTED_PROBABILITY;
-            let respuesta = if autorizado {
-                "PAGO AUTORIZADO\n"
-            } else {
-                "PAGO RECHAZADO\n"
-            };
-            logger_clone.info(&format!("Respuesta: {}", respuesta.trim()));
-            let mut writer = writer_clone.lock().await;
-            let _ = writer.write_all(respuesta.as_bytes()).await;
-        });
-    } else if order.to_uppercase().contains("EJECUTAR") {
-        let writer_clone = Arc::clone(&writer);
-        let logger_clone = logger.clone();
-        tokio::spawn(async move {
-            logger_clone.info("Ejecutando pago...");
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let respuesta = "PAGO EJECUTADO\n";
-            logger_clone.info("Respuesta: PAGO EJECUTADO");
-            let mut writer = writer_clone.lock().await;
-            let _ = writer.write_all(respuesta.as_bytes()).await;
-        });
+) {
+    logger.info("Executing authorizarion...");
+    let authorized = random::<f32>() > PAYMENT_REJECTED_PROBABILITY;
+    let response = if authorized {
+        "PAYMENT AUTHORIZED\n"
     } else {
-        let mut writer = writer.lock().await;
-        writer.write_all(b"COMANDO DESCONOCIDO\n").await?;
-    }
+        "PAYMENT REJECTED\n"
+    };
+    logger.info(&format!("Response: {}", response.trim()));
 
-    Ok(())
+    let mut writer = writer.lock().await;
+    let _ = writer.write_all(response.as_bytes()).await;
+}
+
+async fn execute_payment(writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>, logger: Logger) {
+    logger.info("Executing payment...");
+    tokio::time::sleep(std::time::Duration::from_secs(PAYMENT_DURATION)).await;
+
+    let response = "PAYMENT EXECUTED\n";
+    logger.info(&format!("Response: {}", response.trim()));
+
+    let mut writer = writer.lock().await;
+    let _ = writer.write_all(response.as_bytes()).await;
 }
 
 #[tokio::main]
@@ -68,14 +58,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
     while let Some(line) = lines.next_line().await? {
         let request = line.trim().to_string();
         let writer_clone = Arc::clone(&writer);
+        let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
 
-        tokio::spawn(async move {
-            if let Err(e) =
-                handle_request(request, writer_clone, Logger::new(Some("[PAYMENT-SYSTEM]"))).await
-            {
-                eprintln!("Error handling request: {:?}", e);
-            }
-        });
+        let upper_request = request.to_uppercase();
+        if upper_request.contains("AUTORIZE") {
+            tokio::spawn(execute_authorization(writer_clone, logger));
+        } else if upper_request.contains("EXECUTE") {
+            tokio::spawn(execute_payment(writer_clone, logger));
+        } else {
+            let writer_clone = Arc::clone(&writer);
+            tokio::spawn(async move {
+                let mut writer = writer_clone.lock().await;
+                let _ = writer.write_all(b"UNKNOWN COMMAND\n").await;
+            });
+        }
     }
 
     println!("Connection closed by server");

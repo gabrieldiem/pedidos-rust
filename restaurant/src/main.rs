@@ -11,7 +11,7 @@ use tokio::{
     sync::Mutex,
 };
 
-//TODO: implementar un protocolo entre pedidos rust y restaurente. Esto sigue siendo de juguete
+//TODO: implementar un protocolo entre pedidos rust y restaurente
 async fn handle_order(
     order: String,
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
