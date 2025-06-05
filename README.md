@@ -35,7 +35,7 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
    1. [Customer](#Customer)
    1. [Rider](#Rider)
    1. [Restaurant](#Restaurant)
-   1. [Payment](#Payment)
+   1. [PaymentSystem](#PaymentSystem)
 1. [Mensajes](#Mensajes)
 1. [Resiliencia distribuida](#Resiliencia-distribuida)
 
@@ -43,7 +43,7 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 
 Hay 5 aplicaciones ejecutables, las cuales son referenciados por sus nombres en inglés (por consistencia con la convención de programación):
 
-- Requeridas por la consigna (4 apps): comensales (`customers`), restaurantes (`restaurants`), repartidores (`riders`), gateway de pagos (`payment`).
+- Requeridas por la consigna (4 apps): comensales (`customers`), restaurantes (`restaurants`), repartidores (`riders`), gateway de pagos (`payment-system`).
 
 - Adicional (1 app): aplicación para simplificar el manejo de mensajes entre actores llamada `pedidos-rust`.
 
@@ -56,7 +56,7 @@ El root del repositorio es un workspace que contiene los proyectos (ejecutables 
 ├── common          Código compartido entre aplicaciones y protocolo
 ├── customer        Project del customer
 ├── docs
-├── payment         Project del payment gateway
+├── payment-system         Project del payment gateway
 ├── pedidos-rust    Project del pedidos-rust
 ├── restaurant      Project del restaurant
 ├── rider           Project del rider
@@ -73,7 +73,7 @@ Se deja las instrucciones para ejecutar las diversas apps:
 cargo run -p customer
 ```
 
-**Payment:**
+**Payment-System:**
 
 ```bash
 cargo run -p payment-system
