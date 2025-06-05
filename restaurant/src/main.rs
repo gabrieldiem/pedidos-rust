@@ -1,4 +1,7 @@
-use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_DURATION, MIN_ORDER_DURATION};
+use common::constants::{
+    DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_DURATION, MIN_ORDER_DURATION,
+    ORDER_REJECTED_PROBABILITY,
+};
 use common::utils::logger::Logger;
 use rand::{Rng, random};
 use std::{error::Error, sync::Arc, time::Duration};
@@ -25,7 +28,7 @@ async fn handle_order(
     let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
     tokio::time::sleep(Duration::from_secs(secs)).await;
 
-    let accepted = random::<f32>() > 0.1;
+    let accepted = random::<f32>() > ORDER_REJECTED_PROBABILITY;
 
     if !accepted {
         logger.info(&format!("Order {} rejected due to lack of stock", order));
@@ -73,6 +76,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
         });
     }
 
-    println!("Connection closed by client");
+    println!("Connection closed by server");
     Ok(())
 }
