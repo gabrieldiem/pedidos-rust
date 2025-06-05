@@ -111,7 +111,7 @@ cargo run -p rider
 
 #### Finalidad
 
-Aplicación que es un servidor distribuido que recibe pedidos de los customers, autoriza los pagos con el payment gateway, coordina con los restaurantes la preparación del pedido y una vez listo le ofrece los pedidos a los riders para que realicen el delivery y le da la asignación final al que acepte primero, mantiene actualizado al customer del estado del pedido en todo momento y efectiviza el cobro del pedido una vez se confirma que el delivery fue entregado al customer.
+Aplicación que es un servidor distribuido que recibe pedidos de los customers, autoriza los pagos con el payment gateway, coordina con los restaurantes la preparación del pedido y una vez listo le ofrece los pedidos a los riders más cercanos para que realicen el delivery y le da la asignación final al que acepte primero, mantiene actualizado al customer del estado del pedido en todo momento y efectiviza el cobro del pedido una vez se confirma que el delivery fue entregado al customer.
 
 #### Estado interno
 
@@ -224,13 +224,13 @@ Se comunica con PedidosRust mediante TCP para recibir los pedidos y contestar.
 **Variables internas de `Restaurant`:**
 
 ```rust
-struct Payment {
+struct Restaurant {
     tcp_sender: Addr<TcpSender>,
     location: Location
 }
 ```
 
-### <ins>Payment</ins>
+### <ins>PaymentSystem</ins>
 
 #### Finalidad
 
@@ -242,10 +242,10 @@ Se entiende al payment gateway como un servicio externo de terceros, como podrí
 
 Está modelado con tareas asíncronas para manejar la concurrencia. Utiliza TCP para la comunicación por la red.
 
-**Variables internas de `Payment`:**
+**Variables internas de `PaymentSystem`:**
 
 ```rust
-struct Payment {
+struct PaymentSystem {
     tcp_sender: Addr<TcpSender>,
     logger: Logger,
 }
@@ -262,23 +262,23 @@ Se muestra a continuación un diagrama de secuencia que representa el flujo de m
 Se presentan los mensajes que intercambian las aplicaciones para poder llevar a cabo el envío de pedidos de manera efectiva y resiliente:
 
 | Mensaje                   | Emisor                 | Receptor               | Payload                                                              | Propósito                                                                                                           |
-|---------------------------| ---------------------- | ---------------------- |----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| Get Restaurants           | Customer👨🏻‍🦱             | PedidosRust🦀          | `customer_location: Location` (`Location` son dos enteros `x` e `y`) | Solicitar restaurantes para realizar un pedido                                                                      |
-| Restaurants               | PedidosRust🦀          | Customer👨🏻‍🦱             | `data: String`                                                       | Comunicar los restaurantes disponibles                                                                              |
-| Order                     | Customer👨🏻‍🦱             | PedidosRust🦀          | `restaurant: String, amount: f64`                                    | Realizar un pedido                                                                                                  |
-| Push Notification         | PedidosRust🦀          | Customer👨🏻‍🦱             | `notification_msg: String`                                           | Envío de información para seguimiento en tiempo real del estado del pedido                                          |
+|---------------------------|------------------------|------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Get Restaurants           | Customer👨🏻‍🦱        | PedidosRust🦀          | `customer_location: Location` (`Location` son dos enteros `x` e `y`) | Solicitar restaurantes para realizar un pedido                                                                      |
+| Restaurants               | PedidosRust🦀          | Customer👨🏻‍🦱        | `data: String`                                                       | Comunicar los restaurantes disponibles                                                                              |
+| Order                     | Customer👨🏻‍🦱        | PedidosRust🦀          | `restaurant: String, amount: f64`                                    | Realizar un pedido                                                                                                  |
+| Push Notification         | PedidosRust🦀          | Customer👨🏻‍🦱        | `notification_msg: String`                                           | Envío de información para seguimiento en tiempo real del estado del pedido                                          |
 | Location Update           | Rider🛵                | PedidosRust🦀          | `new_location: Location`                                             | Informar nueva ubicación                                                                                            |
 | Delivery Offer            | PedidosRust🦀          | Rider🛵                | `customer_id: u32, customer_location: Location`                      | Ofrecer un pedido al rider que puede aceptar o no                                                                   |
 | Delivery Offer Accepted   | Rider🛵                | PedidosRust🦀          | `customer_id: u32, customer_location: Location`                      | Aceptar el ofrecimiento de pedido                                                                                   |
 | Delivery Offer Confirmed  | PedidosRust🦀          | Rider🛵                | `customer_id: u32, customer_location: Location`                      | Confirmar que el rider es el elegido para hacer el delivery                                                         |
 | Picked Up From Restaurant | Rider🛵                | PedidosRust🦀          | `rider_id: u32`                                                      | Informar que el rider ya hizo el retiro de la orden del restaurante                                                 |
 | Delivery Done             | Rider🛵                | PedidosRust🦀          | `rider_id: u32`                                                      | Informar que el rider llegó a la ubicación del customer y entregó el pedido                                         |
-| Finish Delivery           | PedidosRust🦀          | Customer👨🏻‍🦱             |                                                                      | Realizar última actualización del pedido para marcar que se completó el mismo, y que el cliente pueda realizar otro |
-| Authorize Payment         | PedidosRust🦀          | Payment 💲             | `customer_id: u32, amount: f64`                                      | Solicitar la autorización del pago                                                                                  |
-| Payment Authorized        | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago se autorizó exitosamente                                                                       |
-| Payment Denied            | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago no se pudo autorizar                                                                           |
-| Execute Payment           | PedidosRust🦀          | Payment 💲             | `customer_id: u32, amount: f64`                                      | Debitar/efectivizar el pago                                                                                         |
-| Payment Executed          | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el débito del pago fue exitoso                                                                         |
+| Finish Delivery           | PedidosRust🦀          | Customer👨🏻‍🦱        |                                                                      | Realizar última actualización del pedido para marcar que se completó el mismo, y que el cliente pueda realizar otro |
+| Authorize PaymentSystem   | PedidosRust🦀          | PaymentSystem 💲       | `customer_id: u32, amount: f64`                                      | Solicitar la autorización del pago                                                                                  |
+| PaymentSystem Authorized  | PaymentSystem 💲       | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago se autorizó exitosamente                                                                       |
+| PaymentSystem Denied      | PaymentSystem 💲       | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago no se pudo autorizar                                                                           |
+| Execute PaymentSystem     | PedidosRust🦀          | PaymentSystem 💲       | `customer_id: u32, amount: f64`                                      | Debitar/efectivizar el pago                                                                                         |
+| PaymentSystem Executed    | PaymentSystem 💲       | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el débito del pago fue exitoso                                                                         |
  Order In Progress         | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Comenzar a preparar orden                                                                                           |
 | Prepare Order             | PedidosRust🦀          | Restaurant🍴           | `customer_id: u32, price: u64`                                       | Preparar orden para un customer                                                                                     |
 | Order In Progress         | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Comenzar a preparar orden                                                                                           |
