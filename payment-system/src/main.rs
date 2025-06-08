@@ -1,6 +1,8 @@
 use common::constants::{
     DEFAULT_PR_HOST, DEFAULT_PR_PORT, PAYMENT_DURATION, PAYMENT_REJECTED_PROBABILITY,
 };
+use common::protocol::SocketMessage;
+use common::tcp::tcp_message::TcpMessage;
 use common::utils::logger::Logger;
 use rand::random;
 use std::{error::Error, sync::Arc};
@@ -10,33 +12,67 @@ use tokio::{
     sync::Mutex,
 };
 
-//TODO: implementar un protocolo entre pedidos rust y el sistema de pagos
 async fn execute_authorization(
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
     logger: Logger,
-) {
-    logger.info("Executing authorizarion...");
+    client_id: u32,
+    amount: f64,
+) -> Result<(), String> {
+    logger.info("Executing authorization...");
     let authorized = random::<f32>() > PAYMENT_REJECTED_PROBABILITY;
+
     let response = if authorized {
-        "PAYMENT AUTHORIZED\n"
+        SocketMessage::PaymentAuthorized(client_id, amount)
     } else {
-        "PAYMENT REJECTED\n"
+        SocketMessage::PaymentDenied(client_id, amount)
     };
-    logger.info(&format!("Response: {}", response.trim()));
+    logger.info(&format!("Response to authorization: {:?}", response));
+
+    let msg_to_send = serde_json::to_string(&response)
+        .map_err(|e| format!("Failed to serialize message: {}", e))?;
+
+    let tcp_message = TcpMessage {
+        data: msg_to_send + "\n",
+    };
 
     let mut writer = writer.lock().await;
-    let _ = writer.write_all(response.as_bytes()).await;
+    writer
+        .write_all(tcp_message.data.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
+
+    Ok(())
 }
 
-async fn execute_payment(writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>, logger: Logger) {
+async fn execute_payment(
+    writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
+    logger: Logger,
+    client_id: u32,
+    amount: f64,
+) -> Result<(), String> {
     logger.info("Executing payment...");
     tokio::time::sleep(std::time::Duration::from_secs(PAYMENT_DURATION)).await;
 
-    let response = "PAYMENT EXECUTED\n";
-    logger.info(&format!("Response: {}", response.trim()));
+    let response = SocketMessage::PaymentExecuted(client_id, amount);
+    let msg_to_send = serde_json::to_string(&response)
+        .map_err(|e| format!("Failed to serialize message: {}", e))?;
+
+    logger.info(&format!(
+        "Payment executed for client {} with amount {}",
+        client_id, amount
+    ));
+
+    let tcp_message = TcpMessage {
+        data: msg_to_send + "\n",
+    };
 
     let mut writer = writer.lock().await;
-    let _ = writer.write_all(response.as_bytes()).await;
+    writer
+        .write_all(tcp_message.data.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
+
+    Ok(())
 }
 
 #[tokio::main]
@@ -56,21 +92,42 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut lines = reader.lines();
 
     while let Some(line) = lines.next_line().await? {
-        let request = line.trim().to_string();
-        let writer_clone = Arc::clone(&writer);
-        let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
+        let trimmed = line.trim();
 
-        let upper_request = request.to_uppercase();
-        if upper_request.contains("AUTORIZE") {
-            tokio::spawn(execute_authorization(writer_clone, logger));
-        } else if upper_request.contains("EXECUTE") {
-            tokio::spawn(execute_payment(writer_clone, logger));
-        } else {
-            let writer_clone = Arc::clone(&writer);
-            tokio::spawn(async move {
-                let mut writer = writer_clone.lock().await;
-                let _ = writer.write_all(b"UNKNOWN COMMAND\n").await;
-            });
+        let parsed: Result<SocketMessage, _> = serde_json::from_str(trimmed);
+        match parsed {
+            Ok(SocketMessage::AuthorizePayment(client_id, amount)) => {
+                let writer_clone = Arc::clone(&writer);
+                let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        execute_authorization(writer_clone, logger.clone(), client_id, amount).await
+                    {
+                        logger.error(&format!(
+                            "Error executing authorization for client {}: {}",
+                            client_id, e
+                        ));
+                    }
+                });
+            }
+            Ok(SocketMessage::ExecutePayment(client_id, amount)) => {
+                let writer_clone = Arc::clone(&writer);
+                let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        execute_payment(writer_clone, logger.clone(), client_id, amount).await
+                    {
+                        logger.error(&format!(
+                            "Error executing payment for client {}: {}",
+                            client_id, e
+                        ));
+                    }
+                });
+            }
+            _ => {
+                let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
+                logger.error(&format!("UNKNOWN OR MALFORMED MESSAGE: {}", trimmed));
+            }
         }
     }
 
