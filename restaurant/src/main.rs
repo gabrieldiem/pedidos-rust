@@ -15,7 +15,6 @@ use tokio::{
 
 /// TODO: que conteste al pinger
 async fn handle_order(
-    order: String,
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
     logger: Logger,
     client_id: u32,
@@ -49,7 +48,10 @@ async fn handle_order(
     let accepted = random::<f32>() > ORDER_REJECTED_PROBABILITY;
 
     if !accepted {
-        logger.info(&format!("Order {} rejected due to lack of stock", order));
+        logger.info(&format!(
+            "Order from client {} with price {} rejected due to lack of stock",
+            client_id, price
+        ));
         let response = SocketMessage::OrderCalcelled(client_id);
         let tcp_message = TcpMessage::from_serialized_json(&response)?;
         let mut writer_guard = writer.lock().await;
@@ -60,7 +62,10 @@ async fn handle_order(
         return Ok(());
     }
 
-    logger.info(&format!("Order {} is ready", order));
+    logger.info(&format!(
+        "Order from client {} with price {} is ready",
+        client_id, price
+    ));
     let response = SocketMessage::OrderReady(client_id);
     let tcp_message = TcpMessage::from_serialized_json(&response)?;
     let mut writer_guard = writer.lock().await;
@@ -94,16 +99,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(SocketMessage::PrepareOrder(client_id, price)) => {
                 let writer_clone = Arc::clone(&writer);
                 let logger = Logger::new(Some("[RESTAURANT]"));
-                let trimmed_clone = trimmed.clone();
                 tokio::spawn(async move {
-                    if let Err(e) = handle_order(
-                        trimmed_clone,
-                        writer_clone,
-                        logger.clone(),
-                        client_id,
-                        price,
-                    )
-                    .await
+                    if let Err(e) =
+                        handle_order(writer_clone, logger.clone(), client_id, price).await
                     {
                         logger.error(&format!(
                             "Error preparing order for client {}: {}",
@@ -113,7 +111,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 });
             }
             Ok(_) => {
-                logger.warn(&format!("Unexpected message: {}", trimmed));
+                logger.error(&format!("Unexpected message: {}", trimmed));
                 continue;
             }
             Err(e) => {
