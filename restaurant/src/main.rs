@@ -2,7 +2,7 @@ use common::constants::{
     DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_DURATION, MIN_ORDER_DURATION,
     ORDER_REJECTED_PROBABILITY,
 };
-use common::protocol::SocketMessage;
+use common::protocol::{Location, SocketMessage};
 use common::tcp::tcp_message::TcpMessage;
 use common::utils::logger::Logger;
 use rand::{Rng, random};
@@ -90,6 +90,22 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (reader_half, writer_half) = split(stream);
     let writer = Arc::new(Mutex::new(writer_half));
+
+    {
+        // Informing location to PedidosRust
+        let location = Location::new(5, 2);
+        let location_msg = SocketMessage::InformLocation(location);
+        let tcp_message = TcpMessage::from_serialized_json(&location_msg)?;
+
+        let mut writer_guard = writer.lock().await;
+        writer_guard
+            .write_all(tcp_message.data.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to send InformLocation: {}", e))?;
+
+        logger.info("Informed location to PedidosRust. Ready to receive orders...");
+    }
+
     let reader = BufReader::new(reader_half);
     let mut lines = reader.lines();
 

@@ -107,4 +107,5 @@ pub enum SocketMessage {
     OrderInProgress(u32),        // u32 is customer_id
     OrderCalcelled(u32),         // u32 is customer_id
     OrderReady(u32),             // u32 is customer_id
+    InformLocation(Location),
 }
