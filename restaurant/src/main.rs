@@ -28,12 +28,7 @@ async fn handle_order(
 
     // Answering PedidosRust that the order is in progress
     let response = SocketMessage::OrderInProgress(client_id);
-    let msg_to_send = serde_json::to_string(&response)
-        .map_err(|e| format!("Failed to serialize message: {}", e))?;
-
-    let tcp_message = TcpMessage {
-        data: msg_to_send + "\n",
-    };
+    let tcp_message = TcpMessage::from_serialized_json(&response)?;
 
     {
         let mut writer_guard = writer.lock().await;
@@ -56,11 +51,7 @@ async fn handle_order(
     if !accepted {
         logger.info(&format!("Order {} rejected due to lack of stock", order));
         let response = SocketMessage::OrderCalcelled(client_id);
-        let msg_to_send = serde_json::to_string(&response)
-            .map_err(|e| format!("Failed to serialize message: {}", e))?;
-        let tcp_message = TcpMessage {
-            data: msg_to_send + "\n",
-        };
+        let tcp_message = TcpMessage::from_serialized_json(&response)?;
         let mut writer_guard = writer.lock().await;
         writer_guard
             .write_all(tcp_message.data.as_bytes())
@@ -71,11 +62,7 @@ async fn handle_order(
 
     logger.info(&format!("Order {} is ready", order));
     let response = SocketMessage::OrderReady(client_id);
-    let msg_to_send = serde_json::to_string(&response)
-        .map_err(|e| format!("Failed to serialize message: {}", e))?;
-    let tcp_message = TcpMessage {
-        data: msg_to_send + "\n",
-    };
+    let tcp_message = TcpMessage::from_serialized_json(&response)?;
     let mut writer_guard = writer.lock().await;
     writer_guard
         .write_all(tcp_message.data.as_bytes())
