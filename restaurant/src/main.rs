@@ -76,6 +76,7 @@ async fn handle_order(
     Ok(())
 }
 
+/// TODO: que informe su location a PedidosRust
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[RESTAURANT]"));
