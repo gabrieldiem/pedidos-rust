@@ -21,10 +21,10 @@ async fn handle_order(
 
     {
         let mut writer = writer.lock().await;
-        writer.write_all(b"PREPARING\n").await?;
+        writer.write_all(b"ORDER IN PROGRESS\n").await?;
     }
 
-    logger.info(&format!("Preparing order: {}...", order));
+    logger.info(&format!("Orden in progress: {}...", order));
     let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
     tokio::time::sleep(Duration::from_secs(secs)).await;
 
