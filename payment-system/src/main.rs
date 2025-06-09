@@ -12,6 +12,7 @@ use tokio::{
     sync::Mutex,
 };
 
+/// TODO: poner las lineas de msg_to_send y tcp_message en una libreria para no repetir codigo
 async fn execute_authorization(
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
     logger: Logger,
@@ -57,14 +58,14 @@ async fn execute_payment(
     let msg_to_send = serde_json::to_string(&response)
         .map_err(|e| format!("Failed to serialize message: {}", e))?;
 
+    let tcp_message = TcpMessage {
+        data: msg_to_send + "\n",
+    };
+
     logger.info(&format!(
         "Payment executed for client {} with amount {}",
         client_id, amount
     ));
-
-    let tcp_message = TcpMessage {
-        data: msg_to_send + "\n",
-    };
 
     let mut writer = writer.lock().await;
     writer

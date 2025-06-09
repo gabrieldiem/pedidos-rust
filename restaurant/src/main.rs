@@ -2,6 +2,8 @@ use common::constants::{
     DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_DURATION, MIN_ORDER_DURATION,
     ORDER_REJECTED_PROBABILITY,
 };
+use common::protocol::SocketMessage;
+use common::tcp::tcp_message::TcpMessage;
 use common::utils::logger::Logger;
 use rand::{Rng, random};
 use std::{error::Error, sync::Arc, time::Duration};
@@ -11,39 +13,74 @@ use tokio::{
     sync::Mutex,
 };
 
-//TODO: implementar un protocolo entre pedidos rust y restaurente
+/// TODO: que conteste al pinger
 async fn handle_order(
     order: String,
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
     logger: Logger,
+    client_id: u32,
+    price: f64,
 ) -> Result<(), Box<dyn Error>> {
-    logger.info(&format!("Order received: {}", order));
+    logger.info(&format!(
+        "Order received from client {} with price {}",
+        client_id, price
+    ));
+
+    // Answering PedidosRust that the order is in progress
+    let response = SocketMessage::OrderInProgress(client_id);
+    let msg_to_send = serde_json::to_string(&response)
+        .map_err(|e| format!("Failed to serialize message: {}", e))?;
+
+    let tcp_message = TcpMessage {
+        data: msg_to_send + "\n",
+    };
 
     {
-        let mut writer = writer.lock().await;
-        writer.write_all(b"ORDER IN PROGRESS\n").await?;
+        let mut writer_guard = writer.lock().await;
+        writer_guard
+            .write_all(tcp_message.data.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to send message: {}", e))?;
     }
 
-    logger.info(&format!("Orden in progress: {}...", order));
+    logger.info(&format!(
+        "Orden from client {} with price {} is in progress...",
+        client_id, price
+    ));
     let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
     tokio::time::sleep(Duration::from_secs(secs)).await;
 
+    // Simulating stock availability for accepting or rejecting the order
     let accepted = random::<f32>() > ORDER_REJECTED_PROBABILITY;
 
     if !accepted {
         logger.info(&format!("Order {} rejected due to lack of stock", order));
-        let mut writer = writer.lock().await;
-        writer.write_all(b"REJECTED\n").await?;
+        let response = SocketMessage::OrderCalcelled(client_id);
+        let msg_to_send = serde_json::to_string(&response)
+            .map_err(|e| format!("Failed to serialize message: {}", e))?;
+        let tcp_message = TcpMessage {
+            data: msg_to_send + "\n",
+        };
+        let mut writer_guard = writer.lock().await;
+        writer_guard
+            .write_all(tcp_message.data.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to send message: {}", e))?;
         return Ok(());
     }
 
     logger.info(&format!("Order {} is ready", order));
-    let respuesta = format!("Order '{}' is ready\n", order);
-    {
-        let mut writer = writer.lock().await;
-        writer.write_all(respuesta.as_bytes()).await?;
-    }
-
+    let response = SocketMessage::OrderReady(client_id);
+    let msg_to_send = serde_json::to_string(&response)
+        .map_err(|e| format!("Failed to serialize message: {}", e))?;
+    let tcp_message = TcpMessage {
+        data: msg_to_send + "\n",
+    };
+    let mut writer_guard = writer.lock().await;
+    writer_guard
+        .write_all(tcp_message.data.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to send message: {}", e))?;
     Ok(())
 }
 
@@ -64,16 +101,39 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut lines = reader.lines();
 
     while let Some(line) = lines.next_line().await? {
-        let order = line.trim().to_string();
-        let writer_clone = Arc::clone(&writer);
-
-        tokio::spawn(async move {
-            if let Err(e) =
-                handle_order(order, writer_clone, Logger::new(Some("[RESTAURANT]"))).await
-            {
-                eprintln!("Error handling order: {:?}", e);
+        let trimmed = line.trim().to_string();
+        let order: Result<SocketMessage, _> = serde_json::from_str(&trimmed);
+        match order {
+            Ok(SocketMessage::PrepareOrder(client_id, price)) => {
+                let writer_clone = Arc::clone(&writer);
+                let logger = Logger::new(Some("[RESTAURANT]"));
+                let trimmed_clone = trimmed.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_order(
+                        trimmed_clone,
+                        writer_clone,
+                        logger.clone(),
+                        client_id,
+                        price,
+                    )
+                    .await
+                    {
+                        logger.error(&format!(
+                            "Error preparing order for client {}: {}",
+                            client_id, e
+                        ));
+                    }
+                });
             }
-        });
+            Ok(_) => {
+                logger.warn(&format!("Unexpected message: {}", trimmed));
+                continue;
+            }
+            Err(e) => {
+                logger.error(&format!("Failed to parse order: {}", e));
+                continue;
+            }
+        }
     }
 
     println!("Connection closed by server");

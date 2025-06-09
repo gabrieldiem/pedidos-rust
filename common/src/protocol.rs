@@ -104,4 +104,7 @@ pub enum SocketMessage {
     PaymentAuthorized(u32, f64), // u32 is customer_id, f64 is amount
     PaymentExecuted(u32, f64),   // u32 is customer_id, f64 is amount
     PrepareOrder(u32, f64),      // u32 is customer_id, f64 is price
+    OrderInProgress(u32),        // u32 is customer_id
+    OrderCalcelled(u32),         // u32 is customer_id
+    OrderReady(u32),             // u32 is customer_id
 }
