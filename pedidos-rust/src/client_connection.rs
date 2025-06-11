@@ -12,7 +12,8 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::protocol::{
     DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, LocationUpdate,
-    Order, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage,
+    Order, OrderInProgress, OrderToRestaurant, PushNotification, Restaurants,
+    RiderArrivedAtCustomer, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -184,6 +185,20 @@ impl Handler<OrderToRestaurant> for ClientConnection {
 }
 
 #[async_handler]
+impl Handler<OrderInProgress> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, msg: OrderInProgress, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Order in progress for customer {}",
+            msg.customer_id
+        ));
+
+        // TODO: PUSH NOTIFICATION AL CLIENTE, OSEA PRIMERO TIENE QUE PASAR POR CONNECTION MANAGER
+    }
+}
+
+#[async_handler]
 impl Handler<PushNotification> for ClientConnection {
     type Result = ();
 
@@ -321,6 +336,11 @@ impl ClientConnection {
                     ctx.address().do_send(RegisterNewRestaurant {
                         restaurant_location: location,
                         name: name.to_string(),
+                    });
+                }
+                SocketMessage::OrderInProgress(client_id) => {
+                    ctx.address().do_send(OrderInProgress {
+                        customer_id: client_id,
                     });
                 }
                 _ => {

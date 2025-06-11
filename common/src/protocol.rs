@@ -40,6 +40,12 @@ pub struct OrderToRestaurant {
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
+pub struct OrderInProgress {
+    pub customer_id: u32,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
 pub struct PushNotification {
     pub notification_msg: String,
 }
