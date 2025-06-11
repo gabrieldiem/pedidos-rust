@@ -225,8 +225,8 @@ Se comunica con PedidosRust mediante TCP para recibir los pedidos y contestar.
 
 ```rust
 struct Restaurant {
-    tcp_sender: Addr<TcpSender>,
-    location: Location
+    location: Location,
+   name: String
 }
 ```
 
@@ -282,7 +282,7 @@ Se presentan los mensajes que intercambian las aplicaciones para poder llevar a 
  Order In Progress         | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Comenzar a preparar orden                                                                                           |
 | Prepare Order             | PedidosRust🦀          | Restaurant🍴           | `customer_id: u32, price: f64`                                       | Preparar orden para un customer                                                                                     |
 | Order Cancelled            | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | La orden fue cancelada debido a falta de stock                                                                      |
-| Inform Location           | Restaurant🍴           | PedidosRust🦀          | `restaurant_location: Location`                                      | Informar su posición a PedidosRust                                                                                  |
+| Inform Location           | Restaurant🍴           | PedidosRust🦀          | `restaurant_location: Location, name: String`                        | Informar posicion y nombre de restaurante nuevo                                                                     |
 | Order Ready               | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Informar que la orden está lista para ser retirada                                                                  |
 | Ping Request              | PedidosRust🦀          | Restaurant🍴 ó Rider🛵 |                                                                      | Consultar si el servicio está on-line mediante UDP                                                                  |
 | Ping Response             | Restaurant🍴 ó Rider🛵 | PedidosRust🦀          |                                                                      | Informar mediante UDP que el servicio sí está on-line                                                               |

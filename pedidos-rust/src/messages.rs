@@ -19,6 +19,15 @@ pub struct RegisterRider {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct RegisterRestaurant {
+    pub name: String,
+    pub id: u32,
+    pub address: Addr<ClientConnection>,
+    pub location: Location,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
 }

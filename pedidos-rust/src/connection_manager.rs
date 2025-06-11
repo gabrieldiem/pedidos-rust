@@ -1,5 +1,5 @@
 use crate::client_connection::ClientConnection;
-use crate::messages::{FindRider, RegisterCustomer, RegisterRider};
+use crate::messages::{FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider};
 use actix::{Actor, Addr, Context, Handler};
 use actix_async_handler::async_handler;
 use common::protocol::{
@@ -11,6 +11,8 @@ use std::collections::{HashMap, VecDeque};
 
 type CustomerId = u32;
 type RiderId = u32;
+type RestaurantId = u32;
+type RestaurantName = String;
 
 pub struct CustomerData {
     pub address: Addr<ClientConnection>,
@@ -23,12 +25,34 @@ impl CustomerData {
     }
 }
 
+#[allow(dead_code)]
+pub struct RestaurantData {
+    pub address: Addr<ClientConnection>,
+    pub id: RestaurantId,
+    pub location: Location,
+}
+
+impl RestaurantData {
+    pub fn new(
+        address: Addr<ClientConnection>,
+        id: RestaurantId,
+        location: Location,
+    ) -> RestaurantData {
+        RestaurantData {
+            address,
+            id,
+            location,
+        }
+    }
+}
+
 pub struct ConnectionManager {
     pub logger: Logger,
     pub riders: HashMap<RiderId, Addr<ClientConnection>>,
     pub customers: HashMap<CustomerId, CustomerData>,
     pub orders_in_process: HashMap<RiderId, CustomerId>,
     pub pending_delivery_requests: VecDeque<FindRider>,
+    pub restaurants: HashMap<RestaurantName, RestaurantData>,
 }
 
 impl ConnectionManager {
@@ -39,6 +63,7 @@ impl ConnectionManager {
             customers: HashMap::new(),
             orders_in_process: HashMap::new(),
             pending_delivery_requests: VecDeque::new(),
+            restaurants: HashMap::new(),
         }
     }
 
@@ -93,6 +118,22 @@ impl Handler<RegisterCustomer> for ConnectionManager {
         self.customers
             .entry(msg.id)
             .or_insert(CustomerData::new(msg.address, msg.location));
+    }
+}
+
+#[async_handler]
+impl Handler<RegisterRestaurant> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: RegisterRestaurant, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Registering Restaurant with ID {} and name {}",
+            msg.id, msg.name
+        ));
+        self.restaurants
+            .entry(msg.name)
+            .or_insert(RestaurantData::new(msg.address, msg.id, msg.location));
+        self.process_pending_requests();
     }
 }
 

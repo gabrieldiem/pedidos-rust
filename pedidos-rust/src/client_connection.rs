@@ -1,5 +1,5 @@
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{FindRider, RegisterCustomer, RegisterRider};
+use crate::messages::{FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
@@ -60,6 +60,39 @@ impl Handler<SendRestaurants> for ClientConnection {
     }
 }
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct RegisterNewRestaurant {
+    restaurant_location: Location,
+    name: String,
+}
+
+#[async_handler]
+impl Handler<RegisterNewRestaurant> for ClientConnection {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: RegisterNewRestaurant,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let res = self.connection_manager.send(RegisterRestaurant {
+            name: msg.name,
+            id: self.id,
+            location: msg.restaurant_location,
+            address: _ctx.address(),
+        });
+
+        let res_awaited = res.await;
+        if let Err(e) = res_awaited {
+            self.logger
+                .error(&format!("Failed to register restaurant: {}", e));
+            return;
+        }
+        self.logger.debug("New restaurant registered");
+    }
+}
+
 #[async_handler]
 impl Handler<Order> for ClientConnection {
     type Result = ();
@@ -75,6 +108,10 @@ impl Handler<Order> for ClientConnection {
             self.logger.error(&e.to_string());
             return;
         }
+
+        // Enviar el mensaje AuthorizePayment al Payment System, y con el handler de PaymentAuthorized
+        // recién ahí se debería enviar un mensaje al restaurante.
+        // Para eso, debería enviar un mensaje a ConnectionManager para que él envie AuthorizePayment
 
         self.connection_manager.do_send(FindRider {
             customer_id: self.id,
@@ -214,6 +251,13 @@ impl ClientConnection {
                 SocketMessage::DeliveryDone => {
                     self.logger.debug("Rider finished the delivery");
                     ctx.address().do_send(DeliveryDone { rider_id: self.id });
+                }
+                SocketMessage::InformLocation(location, name) => {
+                    self.logger.debug("A new restaurant wants to register");
+                    ctx.address().do_send(RegisterNewRestaurant {
+                        restaurant_location: location,
+                        name: name.to_string(),
+                    });
                 }
                 _ => {
                     self.logger

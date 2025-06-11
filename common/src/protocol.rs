@@ -98,14 +98,14 @@ pub enum SocketMessage {
     RiderArrivedAtCustomer,
     DeliveryDone,
     FinishDelivery,
-    ExecutePayment(u32, f64),    // u32 is customer_id, f64 is amount
-    AuthorizePayment(u32, f64),  // u32 is customer_id, f64 is amount
-    PaymentDenied(u32, f64),     // u32 is customer_id, f64 is amount
-    PaymentAuthorized(u32, f64), // u32 is customer_id, f64 is amount
-    PaymentExecuted(u32, f64),   // u32 is customer_id, f64 is amount
-    PrepareOrder(u32, f64),      // u32 is customer_id, f64 is price
-    OrderInProgress(u32),        // u32 is customer_id
-    OrderCalcelled(u32),         // u32 is customer_id
-    OrderReady(u32),             // u32 is customer_id
-    InformLocation(Location),
+    ExecutePayment(u32, f64),         // u32 is customer_id, f64 is amount
+    AuthorizePayment(u32, f64),       // u32 is customer_id, f64 is amount
+    PaymentDenied(u32, f64),          // u32 is customer_id, f64 is amount
+    PaymentAuthorized(u32, f64),      // u32 is customer_id, f64 is amount
+    PaymentExecuted(u32, f64),        // u32 is customer_id, f64 is amount
+    PrepareOrder(u32, f64),           // u32 is customer_id, f64 is price
+    OrderInProgress(u32),             // u32 is customer_id
+    OrderCalcelled(u32),              // u32 is customer_id
+    OrderReady(u32),                  // u32 is customer_id
+    InformLocation(Location, String), // Location is the new location, String is the restaurant name
 }

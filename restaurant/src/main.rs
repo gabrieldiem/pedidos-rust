@@ -13,6 +13,11 @@ use tokio::{
     sync::Mutex,
 };
 
+struct Restaurant {
+    location: Location,
+    name: String,
+}
+
 /// TODO: que conteste al pinger
 async fn handle_order(
     writer: Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
@@ -92,8 +97,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     {
         // Informing location to PedidosRust
-        let location = Location::new(5, 2);
-        let location_msg = SocketMessage::InformLocation(location);
+        let restaurant_data = Restaurant {
+            location: Location::new(5, 2),
+            name: "Mostaza".to_string(),
+        };
+        let location_msg =
+            SocketMessage::InformLocation(restaurant_data.location, restaurant_data.name);
         let tcp_message = TcpMessage::from_serialized_json(&location_msg)?;
 
         let mut writer_guard = writer.lock().await;
