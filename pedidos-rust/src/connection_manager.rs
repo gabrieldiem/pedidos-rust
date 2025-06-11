@@ -1,10 +1,13 @@
 use crate::client_connection::ClientConnection;
-use crate::messages::{FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider};
+use crate::messages::{
+    FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList,
+};
 use actix::{Actor, Addr, Context, Handler};
 use actix_async_handler::async_handler;
+use common::constants::NO_RESTAURANTS;
 use common::protocol::{
     DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, PushNotification,
-    RiderArrivedAtCustomer,
+    Restaurants, RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -133,6 +136,41 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
         self.restaurants
             .entry(msg.name)
             .or_insert(RestaurantData::new(msg.address, msg.id, msg.location));
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<SendRestaurantList> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: SendRestaurantList, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Sending available restaurants to client {}",
+            msg.customer_id
+        ));
+        let restaurant_list = if self.restaurants.is_empty() {
+            NO_RESTAURANTS.to_string()
+        } else {
+            self.restaurants
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        self.logger
+            .debug(&format!("Restaurant list to send: {}", restaurant_list));
+        match self.customers.get(&msg.customer_id) {
+            Some(customer) => {
+                customer.address.do_send(Restaurants {
+                    data: restaurant_list,
+                });
+            }
+            None => {
+                self.logger
+                    .warn("Failed to find customer data when sending restaurant list");
+            }
+        };
         self.process_pending_requests();
     }
 }

@@ -1,4 +1,4 @@
-use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT};
+use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT, NO_RESTAURANTS};
 use common::utils::logger::Logger;
 
 use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
@@ -35,7 +35,7 @@ pub struct Stop;
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct ChooseRestaurant {
-    pub restaurant: String,
+    pub restaurants: String,
 }
 
 #[async_handler]
@@ -76,27 +76,27 @@ impl Handler<ChooseRestaurant> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: ChooseRestaurant, _ctx: &mut Self::Context) -> Self::Result {
-        let restaurants = match serde_json::from_str::<Vec<String>>(&msg.restaurant) {
-            Ok(restaurants) => restaurants,
-            Err(e) => {
-                self.logger
-                    .error(&format!("Failed to deserialize message: {}", e));
-                return;
-            }
-        };
-        self.logger
-            .debug(&format!("All restaurants: {:?}", restaurants));
+        if msg.restaurants.trim() == NO_RESTAURANTS {
+            self.logger.info(&msg.restaurants);
+            return;
+        }
 
-        let chosen_restaurant = match restaurants.first() {
-            Some(restaurant) => restaurant.to_owned(),
-            None => {
-                self.logger.warn("There are no restaurants");
-                return;
-            }
-        };
+        let restaurants: Vec<String> = msg
+            .restaurants
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
 
+        if restaurants.is_empty() {
+            self.logger
+                .warn("No se encontraron restaurantes en el mensaje.");
+            return;
+        }
+
+        let chosen_restaurant = &restaurants[0];
         let amount = 500_f64;
-        let order = OrderContent::new(chosen_restaurant, amount);
+        let order = OrderContent::new(chosen_restaurant.clone(), amount);
         _ctx.address().do_send(Order { order });
     }
 }
@@ -149,7 +149,9 @@ impl Customer {
         match parsed_line {
             Ok(message) => match message {
                 SocketMessage::Restaurants(restaurant) => {
-                    ctx.address().do_send(ChooseRestaurant { restaurant });
+                    ctx.address().do_send(ChooseRestaurant {
+                        restaurants: restaurant,
+                    });
                 }
                 SocketMessage::PushNotification(notification_msg) => {
                     ctx.address().do_send(PushNotification { notification_msg });
@@ -163,8 +165,10 @@ impl Customer {
                 }
             },
             Err(e) => {
-                self.logger
-                    .error(&format!("Failed to deserialize message: {}", e));
+                self.logger.error(&format!(
+                    "Failed to deserialize message: {}. Message received: {}",
+                    e, line_read
+                ));
             }
         }
     }

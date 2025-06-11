@@ -1,10 +1,15 @@
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider};
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
+use crate::messages::{
+    FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList,
+};
+use actix::{
+    Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
+    WrapFuture,
+};
 use actix_async_handler::async_handler;
 use common::protocol::{
     DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, LocationUpdate,
-    Order, PushNotification, RiderArrivedAtCustomer, SocketMessage,
+    Order, PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -29,34 +34,46 @@ pub struct SendRestaurants {
     customer_location: Location,
 }
 
-#[async_handler]
+// No uso #[async_handler] porque, al hacer dos llamadas a send . await hay múltiples combinaciones
+// de futures de Actix dentro de un async fn, y eso no puede resolverse bien en tiempo de
+// compilación porque no implementan el trait ActorFuture. El #[async_handler] es como un decorator
+// pero tiene limitaciones en cuanto a la complejidad de los futures que se pueden usar dentro de él.
+// Por eso, uso el Box::pin(fut.into_actor(self)) para poder usar múltiples futures dentro de un async fn.
 impl Handler<SendRestaurants> for ClientConnection {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
-    async fn handle(&mut self, msg: SendRestaurants, _ctx: &mut Self::Context) -> Self::Result {
-        let res = self.connection_manager.send(RegisterCustomer {
-            id: self.id,
-            location: msg.customer_location,
-            address: _ctx.address(),
-        });
+    fn handle(&mut self, msg: SendRestaurants, ctx: &mut Self::Context) -> Self::Result {
+        let addr = ctx.address();
+        let logger = self.logger.clone();
+        let connection_manager = self.connection_manager.clone();
+        let id = self.id;
 
-        let res_awaited = res.await;
-        if let Err(e) = res_awaited {
-            self.logger
-                .error(&format!("Failed to register customer: {}", e));
-            return;
-        }
+        let fut = async move {
+            let res = connection_manager
+                .send(RegisterCustomer {
+                    id,
+                    location: msg.customer_location,
+                    address: addr,
+                })
+                .await;
 
-        self.logger.debug("Sending Restaurants");
+            if let Err(e) = res {
+                logger.error(&format!("Failed to register customer: {}", e));
+                return;
+            }
 
-        let restaurantes =
-            serde_json::to_string(&vec!["McDonalds", "BurgerKing", "Wendys"]).unwrap();
+            logger.debug("Sending Restaurants");
 
-        let msg = SocketMessage::Restaurants(restaurantes);
+            let res2 = connection_manager
+                .send(SendRestaurantList { customer_id: id })
+                .await;
 
-        if let Err(e) = self.send_message(&msg) {
-            self.logger.error(&e.to_string());
-        }
+            if let Err(e) = res2 {
+                logger.error(&format!("Failed to register restaurant: {}", e));
+            }
+        };
+
+        Box::pin(fut.into_actor(self))
     }
 }
 
@@ -90,6 +107,23 @@ impl Handler<RegisterNewRestaurant> for ClientConnection {
             return;
         }
         self.logger.debug("New restaurant registered");
+    }
+}
+
+#[async_handler]
+impl Handler<Restaurants> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, msg: Restaurants, _ctx: &mut Self::Context) -> Self::Result {
+        let msg_to_send = SocketMessage::Restaurants(msg.data);
+        self.logger.debug(&format!(
+            "Sending restaurant list to client {}: {:?}",
+            self.id, msg_to_send
+        ));
+        if let Err(e) = self.send_message(&msg_to_send) {
+            self.logger.error(&e.to_string());
+            return;
+        }
     }
 }
 

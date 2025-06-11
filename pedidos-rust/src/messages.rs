@@ -28,6 +28,12 @@ pub struct RegisterRestaurant {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct SendRestaurantList {
+    pub customer_id: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
 }
