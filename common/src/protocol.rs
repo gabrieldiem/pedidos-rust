@@ -33,6 +33,13 @@ impl OrderContent {
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
+pub struct OrderToRestaurant {
+    pub customer_id: u32,
+    pub price: f64,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
 pub struct PushNotification {
     pub notification_msg: String,
 }

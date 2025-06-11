@@ -1,13 +1,14 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    FindRider, RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList,
+    FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
+    SendRestaurantList,
 };
 use actix::{Actor, Addr, Context, Handler};
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
 use common::protocol::{
-    DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, PushNotification,
-    Restaurants, RiderArrivedAtCustomer,
+    DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location,
+    OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -171,6 +172,40 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                     .warn("Failed to find customer data when sending restaurant list");
             }
         };
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<PrepareOrder> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: PrepareOrder, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Preparing order for customer {} at restaurant {} with price {}",
+            msg.customer_id, msg.restaurant_name, msg.order_price
+        ));
+        if let Some(restaurant) = self.restaurants.get(&msg.restaurant_name) {
+            if let Some(customer) = self.customers.get(&msg.customer_id) {
+                restaurant.address.do_send(OrderToRestaurant {
+                    customer_id: msg.customer_id,
+                    price: msg.order_price,
+                });
+                let notification_msg = format!(
+                    "Your order at {} is in progress. Price: {}",
+                    msg.restaurant_name, msg.order_price
+                );
+                customer
+                    .address
+                    .do_send(PushNotification { notification_msg });
+            } else {
+                self.logger
+                    .warn("Failed to find customer data when preparing order");
+            }
+        } else {
+            self.logger
+                .warn("Failed to find restaurant data when preparing order");
+        }
         self.process_pending_requests();
     }
 }

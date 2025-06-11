@@ -34,6 +34,14 @@ pub struct SendRestaurantList {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct PrepareOrder {
+    pub customer_id: u32,
+    pub restaurant_name: String,
+    pub order_price: f64,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
 }
