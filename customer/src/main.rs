@@ -9,6 +9,7 @@ use common::protocol::{
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
+use rand::Rng;
 use std::io;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpStream;
@@ -95,8 +96,8 @@ impl Handler<ChooseRestaurant> for Customer {
         }
 
         let chosen_restaurant = &restaurants[0];
-        let amount = 500_f64;
-        let order = OrderContent::new(chosen_restaurant.clone(), amount);
+        let order_price = rand::rng().random_range(100.0..=1000.0);
+        let order = OrderContent::new(chosen_restaurant.clone(), order_price);
         _ctx.address().do_send(Order { order });
     }
 }

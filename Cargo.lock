@@ -188,6 +188,7 @@ dependencies = [
  "actix_async_handler",
  "common",
  "log",
+ "rand",
  "serde",
  "serde_json",
  "tokio",
