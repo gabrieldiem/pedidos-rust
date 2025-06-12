@@ -3,6 +3,7 @@ use crate::server::Server;
 mod client_connection;
 mod connection_manager;
 mod messages;
+mod nearby_entitys;
 mod server;
 
 #[actix_rt::main]

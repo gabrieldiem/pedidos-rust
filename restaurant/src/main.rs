@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     {
         // Informing location to PedidosRust
         let restaurant_data = Restaurant {
-            location: Location::new(5, 2),
+            location: Location::new(9, 9),
             name: "Mostaza".to_string(),
         };
         let location_msg =

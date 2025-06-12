@@ -3,6 +3,7 @@ use crate::messages::{
     FindRider, OrderCancelled, OrderReady, PrepareOrder, RegisterCustomer, RegisterRestaurant,
     RegisterRider, SendNotification, SendRestaurantList,
 };
+use crate::nearby_entitys::nearby_restaurants;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
@@ -150,19 +151,20 @@ impl Handler<SendRestaurantList> for ConnectionManager {
             "Sending available restaurants to client {}",
             msg.customer_id
         ));
-        let restaurant_list = if self.restaurants.is_empty() {
-            NO_RESTAURANTS.to_string()
-        } else {
-            self.restaurants
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-        self.logger
-            .debug(&format!("Restaurant list to send: {}", restaurant_list));
+
         match self.customers.get(&msg.customer_id) {
             Some(customer) => {
+                let nearby = nearby_restaurants(&customer.location, &self.restaurants);
+
+                let restaurant_list = if nearby.is_empty() {
+                    NO_RESTAURANTS.to_string()
+                } else {
+                    nearby.into_iter().cloned().collect::<Vec<_>>().join(", ")
+                };
+
+                self.logger
+                    .debug(&format!("Restaurant list to send: {}", restaurant_list));
+
                 customer.address.do_send(Restaurants {
                     data: restaurant_list,
                 });
@@ -171,7 +173,7 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                 self.logger
                     .warn("Failed to find customer data when sending restaurant list");
             }
-        };
+        }
         self.process_pending_requests();
     }
 }
