@@ -45,3 +45,10 @@ pub struct PrepareOrder {
 pub struct FindRider {
     pub customer_id: u32,
 }
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct SendNotification {
+    pub message: String,
+    pub recipient_id: u32, // ID of the recipient aka receiver of the notification
+}

@@ -1,5 +1,6 @@
 use crate::connection_manager::ConnectionManager;
 // TODO: SACAR UNUSED IMPORTS
+use crate::messages::SendNotification;
 #[allow(unused_imports)]
 use crate::messages::{
     FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
@@ -194,7 +195,11 @@ impl Handler<OrderInProgress> for ClientConnection {
             msg.customer_id
         ));
 
-        // TODO: PUSH NOTIFICATION AL CLIENTE, OSEA PRIMERO TIENE QUE PASAR POR CONNECTION MANAGER
+        let message = SendNotification {
+            message: "Your order is in progress".to_string(),
+            recipient_id: msg.customer_id,
+        };
+        self.connection_manager.do_send(message);
     }
 }
 

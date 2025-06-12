@@ -1,6 +1,6 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
+    FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider, SendNotification,
     SendRestaurantList,
 };
 use actix::{Actor, Addr, Context, Handler};
@@ -207,6 +207,29 @@ impl Handler<PrepareOrder> for ConnectionManager {
                 .warn("Failed to find restaurant data when preparing order");
         }
         self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<SendNotification> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: SendNotification, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Sending notification to customer {}: {}",
+            msg.recipient_id, msg.message
+        ));
+        match self.customers.get(&msg.recipient_id) {
+            Some(customer) => {
+                customer.address.do_send(PushNotification {
+                    notification_msg: msg.message,
+                });
+            }
+            None => {
+                self.logger
+                    .warn("Failed to find customer data when sending notification");
+            }
+        };
     }
 }
 
