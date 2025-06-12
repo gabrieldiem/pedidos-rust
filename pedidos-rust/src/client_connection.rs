@@ -1,11 +1,8 @@
 use crate::connection_manager::ConnectionManager;
-// TODO: SACAR UNUSED IMPORTS
-#[allow(unused_imports)]
-use crate::messages::{
-    FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
-    SendRestaurantList,
-};
 use crate::messages::{OrderCancelled, OrderReady, SendNotification};
+use crate::messages::{
+    OrderRequest, RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList,
+};
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
     WrapFuture,
@@ -147,7 +144,7 @@ impl Handler<Order> for ClientConnection {
         // Para eso, debería enviar un mensaje a ConnectionManager para que él envie AuthorizePayment
         // Me salteo ese paso hasta que esté integrado el Payment System.
         // Envío PrepareOrder a connection manager para que envíe al restaurante correcto.
-        self.connection_manager.do_send(PrepareOrder {
+        self.connection_manager.do_send(OrderRequest {
             customer_id: self.id,
             order_price: msg.order.amount,
             restaurant_name: msg.order.restaurant.clone(),

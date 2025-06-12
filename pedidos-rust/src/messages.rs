@@ -34,7 +34,7 @@ pub struct SendRestaurantList {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct PrepareOrder {
+pub struct OrderRequest {
     pub customer_id: u32,
     pub restaurant_name: String,
     pub order_price: f64,

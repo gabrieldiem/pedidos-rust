@@ -1,6 +1,6 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    FindRider, OrderCancelled, OrderReady, PrepareOrder, RegisterCustomer, RegisterRestaurant,
+    FindRider, OrderCancelled, OrderReady, OrderRequest, RegisterCustomer, RegisterRestaurant,
     RegisterRider, SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
@@ -123,6 +123,7 @@ impl Handler<RegisterCustomer> for ConnectionManager {
         self.customers
             .entry(msg.id)
             .or_insert(CustomerData::new(msg.address, msg.location));
+        self.process_pending_requests();
     }
 }
 
@@ -179,10 +180,10 @@ impl Handler<SendRestaurantList> for ConnectionManager {
 }
 
 #[async_handler]
-impl Handler<PrepareOrder> for ConnectionManager {
+impl Handler<OrderRequest> for ConnectionManager {
     type Result = ();
 
-    async fn handle(&mut self, msg: PrepareOrder, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, msg: OrderRequest, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Preparing order for customer {} at restaurant {} with price {}",
             msg.customer_id, msg.restaurant_name, msg.order_price
