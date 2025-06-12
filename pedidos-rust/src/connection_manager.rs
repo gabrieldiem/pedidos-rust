@@ -1,7 +1,7 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    FindRider, OrderReady, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
-    SendNotification, SendRestaurantList,
+    FindRider, OrderCancelled, OrderReady, PrepareOrder, RegisterCustomer, RegisterRestaurant,
+    RegisterRider, SendNotification, SendRestaurantList,
 };
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
@@ -225,9 +225,6 @@ impl Handler<OrderReady> for ConnectionManager {
     type Result = ResponseActFuture<Self, ()>;
 
     fn handle(&mut self, msg: OrderReady, ctx: &mut Self::Context) -> Self::Result {
-        self.logger
-            .debug(&format!("Order ready for customer {}", msg.customer_id));
-
         if let Some(customer) = self.customers.get(&msg.customer_id) {
             let notification_msg = "Your order is ready!";
             customer.address.do_send(PushNotification {
@@ -243,6 +240,23 @@ impl Handler<OrderReady> for ConnectionManager {
         }
 
         Box::pin(async {}.into_actor(self))
+    }
+}
+
+#[async_handler]
+impl Handler<OrderCancelled> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: OrderCancelled, _ctx: &mut Self::Context) -> Self::Result {
+        if let Some(customer) = self.customers.get(&msg.customer_id) {
+            customer.address.do_send(PushNotification {
+                notification_msg: "Your order has been cancelled".to_string(),
+            });
+            // TODO: DeliveryDone ?
+        } else {
+            self.logger
+                .warn("Failed to find customer data when cancelling order");
+        }
     }
 }
 

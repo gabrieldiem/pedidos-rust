@@ -48,6 +48,12 @@ pub struct OrderReady {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct OrderCancelled {
+    pub customer_id: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
 }

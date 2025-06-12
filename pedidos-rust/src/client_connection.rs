@@ -5,7 +5,7 @@ use crate::messages::{
     FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
     SendRestaurantList,
 };
-use crate::messages::{OrderReady, SendNotification};
+use crate::messages::{OrderCancelled, OrderReady, SendNotification};
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
     WrapFuture,
@@ -152,11 +152,6 @@ impl Handler<Order> for ClientConnection {
             order_price: msg.order.amount,
             restaurant_name: msg.order.restaurant.clone(),
         });
-
-        /* Esto iría en el handler de OrderReady
-        self.connection_manager.do_send(FindRider {
-            customer_id: self.id,
-        }); */
     }
 }
 
@@ -347,6 +342,13 @@ impl ClientConnection {
                     self.connection_manager.do_send(OrderReady {
                         customer_id: client_id,
                     })
+                }
+                SocketMessage::OrderCalcelled(client_id) => {
+                    self.logger
+                        .debug(&format!("Order cancelled for client {}", client_id));
+                    self.connection_manager.do_send(OrderCancelled {
+                        customer_id: client_id,
+                    });
                 }
                 _ => {
                     self.logger
