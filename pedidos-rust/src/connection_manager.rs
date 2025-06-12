@@ -249,10 +249,9 @@ impl Handler<OrderCancelled> for ConnectionManager {
 
     async fn handle(&mut self, msg: OrderCancelled, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer) = self.customers.get(&msg.customer_id) {
-            customer.address.do_send(PushNotification {
-                notification_msg: "Your order has been cancelled".to_string(),
+            customer.address.do_send(FinishDelivery {
+                reason: "Delivery cancelled due to lack of stock".to_string(),
             });
-            // TODO: DeliveryDone ?
         } else {
             self.logger
                 .warn("Failed to find customer data when cancelling order");
@@ -359,7 +358,9 @@ impl Handler<DeliveryDone> for ConnectionManager {
                     Some(customer) => match self.orders_in_process.remove(&msg.rider_id) {
                         Some(_) => {
                             self.logger.debug("Removed finished order");
-                            customer.address.do_send(FinishDelivery);
+                            customer.address.do_send(FinishDelivery {
+                                reason: "Delivery completed successfully".to_string(),
+                            });
                         }
                         None => {
                             self.logger.debug("No order found to be removed");

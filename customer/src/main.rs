@@ -137,7 +137,7 @@ impl Handler<FinishDelivery> for Customer {
     type Result = ();
 
     async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.info("Delivery done! I got my order");
+        self.logger.info(_msg.reason.as_str());
 
         _ctx.address().do_send(Stop);
     }
@@ -157,8 +157,8 @@ impl Customer {
                 SocketMessage::PushNotification(notification_msg) => {
                     ctx.address().do_send(PushNotification { notification_msg });
                 }
-                SocketMessage::FinishDelivery => {
-                    ctx.address().do_send(FinishDelivery);
+                SocketMessage::FinishDelivery(reason) => {
+                    ctx.address().do_send(FinishDelivery { reason });
                 }
                 _ => {
                     self.logger

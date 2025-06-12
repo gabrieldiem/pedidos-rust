@@ -279,7 +279,7 @@ impl Handler<FinishDelivery> for ClientConnection {
     type Result = ();
 
     async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
-        if let Err(e) = self.send_message(&SocketMessage::FinishDelivery) {
+        if let Err(e) = self.send_message(&SocketMessage::FinishDelivery(_msg.reason)) {
             self.logger.error(&e.to_string());
             return;
         }
