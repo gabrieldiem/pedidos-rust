@@ -186,22 +186,10 @@ impl Handler<PrepareOrder> for ConnectionManager {
             msg.customer_id, msg.restaurant_name, msg.order_price
         ));
         if let Some(restaurant) = self.restaurants.get(&msg.restaurant_name) {
-            if let Some(customer) = self.customers.get(&msg.customer_id) {
-                restaurant.address.do_send(OrderToRestaurant {
-                    customer_id: msg.customer_id,
-                    price: msg.order_price,
-                });
-                let notification_msg = format!(
-                    "Your order at {} is in progress. Price: {}",
-                    msg.restaurant_name, msg.order_price
-                );
-                customer
-                    .address
-                    .do_send(PushNotification { notification_msg });
-            } else {
-                self.logger
-                    .warn("Failed to find customer data when preparing order");
-            }
+            restaurant.address.do_send(OrderToRestaurant {
+                customer_id: msg.customer_id,
+                price: msg.order_price,
+            });
         } else {
             self.logger
                 .warn("Failed to find restaurant data when preparing order");
