@@ -1,11 +1,11 @@
 use crate::connection_manager::ConnectionManager;
 // TODO: SACAR UNUSED IMPORTS
-use crate::messages::SendNotification;
 #[allow(unused_imports)]
 use crate::messages::{
     FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
     SendRestaurantList,
 };
+use crate::messages::{OrderReady, SendNotification};
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
     WrapFuture,
@@ -141,13 +141,6 @@ impl Handler<Order> for ClientConnection {
             "Processing order of {} from {}",
             msg.order.amount, msg.order.restaurant
         ));
-
-        /* ESTO IRIA EN EL HANDLER DE ORDER IN PROGRESS
-        let msg_for_notification = SocketMessage::PushNotification("Processing order".to_owned()); // Necesario?
-        if let Err(e) = self.send_message(&msg_for_notification) {
-            self.logger.error(&e.to_string());
-            return;
-        }*/
 
         // Enviar el mensaje AuthorizePayment al Payment System, y con el handler de PaymentAuthorized
         // recién ahí se debería enviar un mensaje al restaurante. Este handler sería en connection manager creo.
@@ -347,6 +340,13 @@ impl ClientConnection {
                     ctx.address().do_send(OrderInProgress {
                         customer_id: client_id,
                     });
+                }
+                SocketMessage::OrderReady(client_id) => {
+                    self.logger
+                        .debug(&format!("Order ready for client {}", client_id));
+                    self.connection_manager.do_send(OrderReady {
+                        customer_id: client_id,
+                    })
                 }
                 _ => {
                     self.logger

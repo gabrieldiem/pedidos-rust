@@ -1,9 +1,9 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    FindRider, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider, SendNotification,
-    SendRestaurantList,
+    FindRider, OrderReady, PrepareOrder, RegisterCustomer, RegisterRestaurant, RegisterRider,
+    SendNotification, SendRestaurantList,
 };
-use actix::{Actor, Addr, Context, Handler};
+use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
 use common::protocol::{
@@ -218,6 +218,31 @@ impl Handler<SendNotification> for ConnectionManager {
                     .warn("Failed to find customer data when sending notification");
             }
         };
+    }
+}
+
+impl Handler<OrderReady> for ConnectionManager {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(&mut self, msg: OrderReady, ctx: &mut Self::Context) -> Self::Result {
+        self.logger
+            .debug(&format!("Order ready for customer {}", msg.customer_id));
+
+        if let Some(customer) = self.customers.get(&msg.customer_id) {
+            let notification_msg = "Your order is ready!";
+            customer.address.do_send(PushNotification {
+                notification_msg: notification_msg.to_string(),
+            });
+
+            ctx.address().do_send(FindRider {
+                customer_id: msg.customer_id,
+            });
+        } else {
+            self.logger
+                .warn("Failed to find customer data when notifying order ready");
+        }
+
+        Box::pin(async {}.into_actor(self))
     }
 }
 
