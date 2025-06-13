@@ -1,15 +1,16 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    FindRider, OrderCancelled, OrderReady, OrderRequest, RegisterCustomer, RegisterRestaurant,
-    RegisterRider, SendNotification, SendRestaurantList,
+    AuthorizePayment, FindRider, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
+    RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant, RegisterRider, SendNotification,
+    SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
 use common::protocol::{
-    DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location,
-    OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery,
+    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -58,6 +59,7 @@ pub struct ConnectionManager {
     pub orders_in_process: HashMap<RiderId, CustomerId>,
     pub pending_delivery_requests: VecDeque<FindRider>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
+    pub payment_system: Option<Addr<ClientConnection>>,
 }
 
 impl ConnectionManager {
@@ -69,6 +71,7 @@ impl ConnectionManager {
             orders_in_process: HashMap::new(),
             pending_delivery_requests: VecDeque::new(),
             restaurants: HashMap::new(),
+            payment_system: None,
         }
     }
 
@@ -144,6 +147,21 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
 }
 
 #[async_handler]
+impl Handler<RegisterPaymentSystem> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: RegisterPaymentSystem,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger.debug("Registering Payment System");
+        self.payment_system = Some(msg.address);
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
 impl Handler<SendRestaurantList> for ConnectionManager {
     type Result = ();
 
@@ -175,6 +193,65 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                     .warn("Failed to find customer data when sending restaurant list");
             }
         }
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<AuthorizePayment> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: AuthorizePayment, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Authorizing payment for customer {} with price {}",
+            msg.customer_id, msg.price
+        ));
+
+        let msg_to_send = AuthorizePaymentRequest {
+            customer_id: msg.customer_id,
+            price: msg.price,
+            restaurant_name: msg.restaurant_name.clone(),
+        };
+
+        if let Some(payment_system) = &self.payment_system {
+            payment_system.do_send(msg_to_send);
+        } else {
+            self.logger
+                .warn("Failed to find payment system when authorizing payment");
+            // TODO: Delivery Done al customer con el mensaje de que no anda el sistema de pago y lo vuelva a intentar mas tarde
+        }
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<PaymentAuthorized> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: PaymentAuthorized, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Payment authorized for customer {} with amount {}",
+            msg.customer_id, msg.amount
+        ));
+
+        if let Some(customer) = self.customers.get(&msg.customer_id) {
+            customer.address.do_send(PushNotification {
+                notification_msg: format!(
+                    "Payment of {} authorized for your order at {}",
+                    msg.amount, msg.restaurant_name
+                ),
+            });
+
+            _ctx.address().do_send(OrderRequest {
+                customer_id: msg.customer_id,
+                restaurant_name: msg.restaurant_name.clone(),
+                order_price: msg.amount,
+            });
+        } else {
+            self.logger
+                .warn("Failed to find customer data when authorizing payment");
+        }
+
         self.process_pending_requests();
     }
 }

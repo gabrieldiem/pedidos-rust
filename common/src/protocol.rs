@@ -33,6 +33,14 @@ impl OrderContent {
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
+pub struct AuthorizePaymentRequest {
+    pub customer_id: u32,
+    pub price: f64,
+    pub restaurant_name: String,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
 pub struct OrderToRestaurant {
     pub customer_id: u32,
     pub price: f64,
@@ -114,13 +122,14 @@ pub enum SocketMessage {
     DeliveryDone,
     FinishDelivery(String), // String is the reason for finishing the delivery
     ExecutePayment(u32, f64), // u32 is customer_id, f64 is amount
-    AuthorizePayment(u32, f64), // u32 is customer_id, f64 is amount
-    PaymentDenied(u32, f64), // u32 is customer_id, f64 is amount
-    PaymentAuthorized(u32, f64), // u32 is customer_id, f64 is amount
-    PaymentExecuted(u32, f64), // u32 is customer_id, f64 is amount
-    PrepareOrder(u32, f64), // u32 is customer_id, f64 is price
-    OrderInProgress(u32),   // u32 is customer_id
-    OrderCalcelled(u32),    // u32 is customer_id
-    OrderReady(u32),        // u32 is customer_id
+    AuthorizePayment(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
+    PaymentDenied(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
+    PaymentAuthorized(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
+    PaymentExecuted(u32, f64),           // u32 is customer_id, f64 is amount
+    PrepareOrder(u32, f64),              // u32 is customer_id, f64 is price
+    OrderInProgress(u32),                // u32 is customer_id
+    OrderCalcelled(u32),                 // u32 is customer_id
+    OrderReady(u32),                     // u32 is customer_id
     InformLocation(Location, String), // Location is the new location, String is the restaurant name
+    RegisterPaymentSystem,
 }

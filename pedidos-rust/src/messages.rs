@@ -28,8 +28,30 @@ pub struct RegisterRestaurant {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct RegisterPaymentSystem {
+    pub address: Addr<ClientConnection>,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct PaymentAuthorized {
+    pub customer_id: u32,
+    pub amount: f64,
+    pub restaurant_name: String,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct SendRestaurantList {
     pub customer_id: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct AuthorizePayment {
+    pub customer_id: u32,
+    pub price: f64,
+    pub restaurant_name: String,
 }
 
 #[derive(Message, Debug)]

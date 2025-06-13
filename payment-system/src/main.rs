@@ -1,12 +1,13 @@
 use common::constants::{
-    DEFAULT_PAYMENT_HOST, DEFAULT_PAYMENT_PORT, PAYMENT_DURATION, PAYMENT_REJECTED_PROBABILITY,
+    DEFAULT_PR_HOST, DEFAULT_PR_PORT, PAYMENT_DURATION, PAYMENT_REJECTED_PROBABILITY,
 };
 use common::protocol::SocketMessage;
 use common::tcp::tcp_message::TcpMessage;
 use common::utils::logger::Logger;
 use rand::random;
 use std::{error::Error, sync::Arc};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::split;
+use tokio::net::TcpStream;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     sync::Mutex,
@@ -17,14 +18,15 @@ async fn execute_authorization(
     logger: Logger,
     client_id: u32,
     amount: f64,
+    restaurant_name: String,
 ) -> Result<(), String> {
     logger.info("Executing authorization...");
     let authorized = random::<f32>() > PAYMENT_REJECTED_PROBABILITY;
 
     let response = if authorized {
-        SocketMessage::PaymentAuthorized(client_id, amount)
+        SocketMessage::PaymentAuthorized(client_id, amount, restaurant_name)
     } else {
-        SocketMessage::PaymentDenied(client_id, amount)
+        SocketMessage::PaymentDenied(client_id, amount, restaurant_name)
     };
     logger.info(&format!("Response to authorization: {:?}", response));
 
@@ -65,66 +67,67 @@ async fn execute_payment(
     Ok(())
 }
 
-async fn handle_client(stream: TcpStream, logger: Logger) {
-    let (reader_half, writer_half) = tokio::io::split(stream);
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
+    logger.info("Starting...");
+
+    let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
+    let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
+
+    logger.info(&format!("Using address {}", stream.local_addr()?));
+    logger.info(&format!("Connected to server {}", server_sockeaddr_str));
+
+    let (reader_half, writer_half) = split(stream);
     let writer = Arc::new(Mutex::new(writer_half));
     let reader = BufReader::new(reader_half);
     let mut lines = reader.lines();
 
-    while let Ok(Some(line)) = lines.next_line().await {
+    while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim();
 
-        match serde_json::from_str::<SocketMessage>(trimmed) {
-            Ok(SocketMessage::AuthorizePayment(client_id, amount)) => {
+        let parsed: Result<SocketMessage, _> = serde_json::from_str(trimmed);
+        match parsed {
+            Ok(SocketMessage::AuthorizePayment(client_id, amount, restaurant_name)) => {
                 let writer_clone = Arc::clone(&writer);
-                let logger = logger.clone();
+                let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        execute_authorization(writer_clone, logger.clone(), client_id, amount).await
+                    if let Err(e) = execute_authorization(
+                        writer_clone,
+                        logger.clone(),
+                        client_id,
+                        amount,
+                        restaurant_name,
+                    )
+                    .await
                     {
-                        logger.error(&format!("Error in authorization: {}", e));
+                        logger.error(&format!(
+                            "Error executing authorization for client {}: {}",
+                            client_id, e
+                        ));
                     }
                 });
             }
             Ok(SocketMessage::ExecutePayment(client_id, amount)) => {
                 let writer_clone = Arc::clone(&writer);
-                let logger = logger.clone();
+                let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
                 tokio::spawn(async move {
                     if let Err(e) =
                         execute_payment(writer_clone, logger.clone(), client_id, amount).await
                     {
-                        logger.error(&format!("Error in payment: {}", e));
+                        logger.error(&format!(
+                            "Error executing payment for client {}: {}",
+                            client_id, e
+                        ));
                     }
                 });
             }
             _ => {
+                let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
                 logger.error(&format!("UNKNOWN OR MALFORMED MESSAGE: {}", trimmed));
             }
         }
     }
-
-    logger.info("Client disconnected.");
-}
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
-    logger.info("Starting Payment Gateway server...");
-
-    let addr = format!("{}:{}", DEFAULT_PAYMENT_HOST, DEFAULT_PAYMENT_PORT);
-    let listener = TcpListener::bind(addr.clone()).await?;
-    logger.info(&format!("Listening on {}", addr));
-
-    loop {
-        match listener.accept().await {
-            Ok((stream, addr)) => {
-                logger.info(&format!("New client connected: {}", addr));
-                let logger_clone = logger.clone();
-                tokio::spawn(handle_client(stream, logger_clone));
-            }
-            Err(e) => {
-                logger.error(&format!("Failed to accept connection: {}", e));
-            }
-        }
-    }
+    println!("Connection closed by server");
+    Ok(())
 }

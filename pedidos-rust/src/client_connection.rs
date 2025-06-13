@@ -1,17 +1,18 @@
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{OrderCancelled, OrderReady, SendNotification};
 use crate::messages::{
-    OrderRequest, RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList,
+    AuthorizePayment, OrderCancelled, OrderReady, PaymentAuthorized, RegisterPaymentSystem,
+    SendNotification,
 };
+use crate::messages::{RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList};
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
     WrapFuture,
 };
 use actix_async_handler::async_handler;
 use common::protocol::{
-    DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery, Location, LocationUpdate,
-    Order, OrderInProgress, OrderToRestaurant, PushNotification, Restaurants,
-    RiderArrivedAtCustomer, SocketMessage,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery,
+    Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant, PushNotification,
+    Restaurants, RiderArrivedAtCustomer, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -138,17 +139,45 @@ impl Handler<Order> for ClientConnection {
             "Processing order of {} from {}",
             msg.order.amount, msg.order.restaurant
         ));
+        self.connection_manager.do_send(AuthorizePayment {
+            customer_id: self.id,
+            price: msg.order.amount,
+            restaurant_name: msg.order.restaurant.clone(),
+        });
 
-        // Enviar el mensaje AuthorizePayment al Payment System, y con el handler de PaymentAuthorized
+        // Enviar el mensaje AUTORIZEPAYMENT al Payment System, y con el handler de PaymentAuthorized
         // recién ahí se debería enviar un mensaje al restaurante. Este handler sería en connection manager creo.
         // Para eso, debería enviar un mensaje a ConnectionManager para que él envie AuthorizePayment
         // Me salteo ese paso hasta que esté integrado el Payment System.
         // Envío PrepareOrder a connection manager para que envíe al restaurante correcto.
+        /*
         self.connection_manager.do_send(OrderRequest {
             customer_id: self.id,
             order_price: msg.order.amount,
             restaurant_name: msg.order.restaurant.clone(),
-        });
+        }); */
+    }
+}
+
+#[async_handler]
+impl Handler<AuthorizePaymentRequest> for ClientConnection {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: AuthorizePaymentRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger.debug(&format!(
+            "Sending AuthorizePayment to payment system for customer {} with price {}",
+            msg.customer_id, msg.price
+        ));
+
+        let msg = SocketMessage::AuthorizePayment(msg.customer_id, msg.price, msg.restaurant_name);
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
+            return;
+        }
     }
 }
 
@@ -346,6 +375,18 @@ impl ClientConnection {
                     self.connection_manager.do_send(OrderCancelled {
                         customer_id: client_id,
                     });
+                }
+                SocketMessage::RegisterPaymentSystem => {
+                    self.connection_manager.do_send(RegisterPaymentSystem {
+                        address: ctx.address(),
+                    });
+                }
+                SocketMessage::PaymentAuthorized(customer_id, amount, restaurant_name) => {
+                    self.connection_manager.do_send(PaymentAuthorized {
+                        customer_id,
+                        amount,
+                        restaurant_name,
+                    })
                 }
                 _ => {
                     self.logger
