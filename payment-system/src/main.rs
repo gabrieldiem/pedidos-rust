@@ -20,7 +20,10 @@ async fn execute_authorization(
     amount: f64,
     restaurant_name: String,
 ) -> Result<(), String> {
-    logger.info("Executing authorization...");
+    logger.info(&format!(
+        "Executing authorization for client {} with price {}...",
+        client_id, amount
+    ));
     let authorized = random::<f32>() > PAYMENT_REJECTED_PROBABILITY;
 
     let response = if authorized {
@@ -66,7 +69,7 @@ async fn execute_payment(
 
     Ok(())
 }
-// TODO: QUE LE ENVIE UN MENSAJE DE REGISTRARSE PRIMERO AL PR
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));

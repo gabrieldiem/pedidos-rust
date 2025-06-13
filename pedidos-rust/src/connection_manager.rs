@@ -1,8 +1,8 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, FindRider, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant, RegisterRider, SendNotification,
-    SendRestaurantList,
+    PaymentDenied, RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant, RegisterRider,
+    SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
@@ -252,6 +252,32 @@ impl Handler<PaymentAuthorized> for ConnectionManager {
                 .warn("Failed to find customer data when authorizing payment");
         }
 
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<PaymentDenied> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: PaymentDenied, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Payment denied for customer {} with amount {}",
+            msg.customer_id, msg.amount
+        ));
+
+        if let Some(customer) = self.customers.get(&msg.customer_id) {
+            let reason_msg = format!(
+                "Payment of {} denied for your order at {}.",
+                msg.amount, msg.restaurant_name
+            );
+            customer.address.do_send(FinishDelivery {
+                reason: reason_msg.clone(),
+            });
+        } else {
+            self.logger
+                .warn("Failed to find customer data when denying payment");
+        }
         self.process_pending_requests();
     }
 }

@@ -1,7 +1,7 @@
 use crate::connection_manager::ConnectionManager;
 use crate::messages::{
-    AuthorizePayment, OrderCancelled, OrderReady, PaymentAuthorized, RegisterPaymentSystem,
-    SendNotification,
+    AuthorizePayment, OrderCancelled, OrderReady, PaymentAuthorized, PaymentDenied,
+    RegisterPaymentSystem, SendNotification,
 };
 use crate::messages::{RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList};
 use actix::{
@@ -144,18 +144,6 @@ impl Handler<Order> for ClientConnection {
             price: msg.order.amount,
             restaurant_name: msg.order.restaurant.clone(),
         });
-
-        // Enviar el mensaje AUTORIZEPAYMENT al Payment System, y con el handler de PaymentAuthorized
-        // recién ahí se debería enviar un mensaje al restaurante. Este handler sería en connection manager creo.
-        // Para eso, debería enviar un mensaje a ConnectionManager para que él envie AuthorizePayment
-        // Me salteo ese paso hasta que esté integrado el Payment System.
-        // Envío PrepareOrder a connection manager para que envíe al restaurante correcto.
-        /*
-        self.connection_manager.do_send(OrderRequest {
-            customer_id: self.id,
-            order_price: msg.order.amount,
-            restaurant_name: msg.order.restaurant.clone(),
-        }); */
     }
 }
 
@@ -383,6 +371,13 @@ impl ClientConnection {
                 }
                 SocketMessage::PaymentAuthorized(customer_id, amount, restaurant_name) => {
                     self.connection_manager.do_send(PaymentAuthorized {
+                        customer_id,
+                        amount,
+                        restaurant_name,
+                    })
+                }
+                SocketMessage::PaymentDenied(customer_id, amount, restaurant_name) => {
+                    self.connection_manager.do_send(PaymentDenied {
                         customer_id,
                         amount,
                         restaurant_name,

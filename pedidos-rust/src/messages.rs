@@ -42,6 +42,14 @@ pub struct PaymentAuthorized {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct PaymentDenied {
+    pub customer_id: u32,
+    pub amount: f64,
+    pub restaurant_name: String,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct SendRestaurantList {
     pub customer_id: u32,
 }

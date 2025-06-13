@@ -111,17 +111,15 @@ pub struct FinishDelivery {
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
-    GetRestaurants(Location),     // Location is customer_location
-    Restaurants(String),          // String is serialized json restaurants
-    Order(OrderContent),          // OrderContent is the order content
-    PushNotification(String),     // String is the notification message
-    LocationUpdate(Location),     // Location is the new location
-    DeliveryOffer(u32, Location), // u32 is customer_id, Location is customer location
-    DeliveryOfferAccepted(u32),   // u32 is customer_id
-    RiderArrivedAtCustomer,
-    DeliveryDone,
-    FinishDelivery(String), // String is the reason for finishing the delivery
-    ExecutePayment(u32, f64), // u32 is customer_id, f64 is amount
+    GetRestaurants(Location),            // Location is customer_location
+    Restaurants(String),                 // String is serialized json restaurants
+    Order(OrderContent),                 // OrderContent is the order content
+    PushNotification(String),            // String is the notification message
+    LocationUpdate(Location),            // Location is the new location
+    DeliveryOffer(u32, Location),        // u32 is customer_id, Location is customer location
+    DeliveryOfferAccepted(u32),          // u32 is customer_id
+    FinishDelivery(String),              // String is the reason for finishing the delivery
+    ExecutePayment(u32, f64),            // u32 is customer_id, f64 is amount
     AuthorizePayment(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
     PaymentDenied(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
     PaymentAuthorized(u32, f64, String), // u32 is customer_id, f64 is amount
@@ -132,4 +130,6 @@ pub enum SocketMessage {
     OrderReady(u32),                 // u32 is customer_id
     InformLocation(Location, String), // Location is the new location, String is the restaurant name
     RegisterPaymentSystem,
+    RiderArrivedAtCustomer,
+    DeliveryDone,
 }
