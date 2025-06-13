@@ -1,4 +1,6 @@
-use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT, NO_RESTAURANTS};
+use common::constants::{
+    DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS,
+};
 use common::utils::logger::Logger;
 
 use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
@@ -97,8 +99,8 @@ impl Handler<ChooseRestaurant> for Customer {
 
         let chosen_restaurant = &restaurants[0];
 
-        let raw_price: f64 = rand::rng().random_range(100.0..=1000.0);
-        let order_price = (raw_price * 1000.0).round() / 1000.0;
+        let raw_price: f64 = rand::rng().random_range(MIN_ORDER_PRICE..=MAX_ORDER_PRICE);
+        let order_price = (raw_price * 100.0).round() / 100.0;
 
         let order = OrderContent::new(chosen_restaurant.clone(), order_price);
         _ctx.address().do_send(Order { order });
