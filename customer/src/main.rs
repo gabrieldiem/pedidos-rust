@@ -1,263 +1,48 @@
-use common::constants::{
-    DEFAULT_PR_HOST, DEFAULT_PR_PORT, MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS,
-};
-use common::utils::logger::Logger;
+use crate::customer::{Customer, Start};
+use actix::Addr;
+use std::{env, process};
+mod customer;
 
-use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
-use actix::{Addr, Message, StreamHandler};
-use actix_async_handler::async_handler;
-use common::protocol::{
-    FinishDelivery, GetRestaurants, Location, Order, OrderContent, PushNotification, SocketMessage,
-};
-use common::tcp::tcp_message::TcpMessage;
-use common::tcp::tcp_sender::TcpSender;
-use rand::Rng;
-use std::io;
-use tokio::io::{AsyncBufReadExt, BufReader, split};
-use tokio::net::TcpStream;
-use tokio_stream::wrappers::LinesStream;
+fn parse_args() -> u32 {
+    let args: Vec<String> = env::args().collect();
 
-struct Customer {
-    tcp_sender: Addr<TcpSender>,
-    logger: Logger,
-    location: Location,
-}
-
-impl Actor for Customer {
-    type Context = Context<Self>;
-}
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct Start;
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct Stop;
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct ChooseRestaurant {
-    pub restaurants: String,
-}
-
-#[async_handler]
-impl Handler<Start> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
-        _ctx.address().do_send(GetRestaurants {
-            customer_location: self.location,
-        });
+    if args.len() != 2 {
+        eprintln!("Wrong program call. Usage: {} <id>", args[0]);
+        process::exit(1);
     }
-}
 
-#[async_handler]
-impl Handler<Stop> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.debug("Stopping Customer");
-        _ctx.stop();
-    }
-}
-
-#[async_handler]
-impl Handler<GetRestaurants> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, msg: GetRestaurants, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.debug("Getting Restaurants");
-        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(msg.customer_location)) {
-            self.logger.error(&e.to_string());
+    match args[1].parse::<u32>() {
+        Ok(id) => id,
+        Err(_) => {
+            eprintln!("Error: <id> must be a positive integer.");
+            process::exit(1);
         }
     }
 }
 
-#[async_handler]
-impl Handler<ChooseRestaurant> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, msg: ChooseRestaurant, _ctx: &mut Self::Context) -> Self::Result {
-        if msg.restaurants.trim() == NO_RESTAURANTS {
-            self.logger.info(&msg.restaurants);
-            return;
-        }
-
-        let restaurants: Vec<String> = msg
-            .restaurants
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-
-        if restaurants.is_empty() {
-            self.logger
-                .warn("No se encontraron restaurantes en el mensaje.");
-            return;
-        }
-
-        let chosen_restaurant = &restaurants[0];
-
-        let raw_price: f64 = rand::rng().random_range(MIN_ORDER_PRICE..=MAX_ORDER_PRICE);
-        let order_price = (raw_price * 100.0).round() / 100.0;
-
-        let order = OrderContent::new(chosen_restaurant.clone(), order_price);
-        _ctx.address().do_send(Order { order });
-    }
-}
-
-#[async_handler]
-impl Handler<Order> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, msg: Order, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.debug(&format!(
-            "I will order {} from {}",
-            msg.order.amount, msg.order.restaurant
-        ));
-
-        let msg = SocketMessage::Order(msg.order);
-
-        if let Err(e) = self.send_message(&msg) {
-            self.logger.error(&e.to_string());
-        }
-    }
-}
-
-#[async_handler]
-impl Handler<PushNotification> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, msg: PushNotification, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.info(&format!(
-            "Update received: {}",
-            msg.notification_msg.as_str()
-        ));
-    }
-}
-
-#[async_handler]
-impl Handler<FinishDelivery> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.info(_msg.reason.as_str());
-
-        _ctx.address().do_send(Stop);
-        // TODO: que pueda hacer otro pedido, o que al menos mate este proceso
-    }
-}
-
-impl Customer {
-    #[allow(unreachable_patterns)]
-    fn dispatch_message(&mut self, line_read: String, ctx: &mut <Customer as Actor>::Context) {
-        let parsed_line = serde_json::from_str(&line_read);
-        match parsed_line {
-            Ok(message) => match message {
-                SocketMessage::Restaurants(restaurant) => {
-                    ctx.address().do_send(ChooseRestaurant {
-                        restaurants: restaurant,
-                    });
-                }
-                SocketMessage::PushNotification(notification_msg) => {
-                    ctx.address().do_send(PushNotification { notification_msg });
-                }
-                SocketMessage::FinishDelivery(reason) => {
-                    ctx.address().do_send(FinishDelivery { reason });
-                }
-                _ => {
-                    self.logger
-                        .warn(&format!("Unrecognized message: {:?}", message));
-                }
-            },
-            Err(e) => {
-                self.logger.error(&format!(
-                    "Failed to deserialize message: {}. Message received: {}",
-                    e, line_read
-                ));
-            }
-        }
+async fn run(customer: Addr<Customer>) -> std::io::Result<()> {
+    match customer.send(Start).await {
+        Ok(_) => {}
+        Err(e) => eprintln!("Could not start actor: {e}"),
     }
 
-    fn send_message(&self, socket_message: &SocketMessage) -> Result<(), String> {
-        // message serialization
-        let msg_to_send = match serde_json::to_string(socket_message) {
-            Ok(ok_result) => ok_result,
-            Err(e) => {
-                return Err(format!("Failed to serialize message: {}", e));
-            }
-        };
-
-        // sending message
-        if let Err(e) = self.tcp_sender.try_send(TcpMessage {
-            data: msg_to_send + "\n",
-        }) {
-            return Err(format!("Failed to write to stream: {}", e));
-        }
-
-        Ok(())
-    }
-}
-
-impl StreamHandler<Result<String, io::Error>> for Customer {
-    fn handle(&mut self, msg_read: Result<String, io::Error>, ctx: &mut Self::Context) {
-        match msg_read {
-            Ok(line_read) => match line_read.strip_suffix("\n") {
-                Some(line_stripped) => {
-                    self.dispatch_message(line_stripped.to_string(), ctx);
-                }
-                None => {
-                    if line_read.is_empty() {
-                        self.logger.warn("Empty line received");
-                    } else {
-                        self.dispatch_message(line_read, ctx);
-                    }
-                }
-            },
-            Err(e) => {
-                self.logger
-                    .error(&format!("Failed to read from stream: {}", e));
-            }
-        }
-    }
+    actix_rt::signal::ctrl_c().await
 }
 
 #[actix_rt::main]
-async fn main() -> io::Result<()> {
-    let logger = Logger::new(Some("[CUSTOMER]"));
-    logger.info("Starting...");
+async fn main() {
+    let id = parse_args();
 
-    let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
-    let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
-
-    logger.info(&format!("Using address {}", stream.local_addr()?));
-    logger.info(&format!("Connected to server {}", server_sockeaddr_str));
-
-    let customer = Customer::create(|ctx| {
-        let (read_half, write_half) = split(stream);
-
-        Customer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
-        let tcp_sender = TcpSender {
-            write_stream: Some(write_half),
+    match Customer::new(id).await {
+        Ok(customer) => {
+            if let Err(error) = run(customer).await {
+                eprintln!("Customer failed to start");
+                eprintln!("{}", error);
+            }
         }
-        .start();
-
-        logger.debug("Created Customer");
-        let customer_location = Location::new(10, 10);
-        Customer {
-            tcp_sender,
-            logger: Logger::new(Some("[CUSTOMER]")),
-            location: customer_location,
+        Err(error) => {
+            eprintln!("Customer failed to start");
+            eprintln!("{}", error);
         }
-    });
-
-    match customer.send(Start).await {
-        Ok(_) => {}
-        Err(e) => logger.error(&format!("Could not start actor: {e}")),
     }
-
-    actix_rt::signal::ctrl_c().await?;
-
-    Ok(())
 }

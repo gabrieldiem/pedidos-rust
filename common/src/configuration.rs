@@ -12,8 +12,14 @@ pub struct PedidosRustConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct CustomerConfig {
+    pub ports: Vec<PortIdPair>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Configuration {
     pub pedidos_rust: PedidosRustConfig,
+    pub customer: CustomerConfig,
 }
 
 impl Configuration {
