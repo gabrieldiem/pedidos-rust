@@ -1,33 +1,45 @@
 use crate::client_connection::ClientConnection;
-
 use crate::connection_manager::ConnectionManager;
+use crate::heartbeat::HeartbeatMonitor;
 use actix::{Actor, Addr, StreamHandler};
-use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT};
+use common::configuration::Configuration;
+use common::constants::DEFAULT_PR_HOST;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::LinesStream;
 
+#[allow(dead_code)]
 pub struct Server {
+    id: u32,
     logger: Logger,
+    configuration: Configuration,
+    hearbeat_monitor: Addr<HeartbeatMonitor>,
     connection_manager: Addr<ConnectionManager>,
 }
 
 impl Server {
-    pub fn new() -> Server {
-        let logger = Logger::new(Some("[PEDIDOS-RUST]"));
+    pub fn new(id: u32) -> Result<Server, Box<dyn std::error::Error>> {
+        let logger_prefix = format!("[PEDIDOS-RUST-{}]", id);
+        let logger = Logger::new(Some(&logger_prefix));
 
         let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new());
+        let configuration = Configuration::new()?;
+        let hearbeat_monitor =
+            HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
-        Server {
+        Ok(Server {
+            id,
             logger,
+            configuration,
+            hearbeat_monitor,
             connection_manager,
-        }
+        })
     }
 
-    pub async fn start(&self) {
-        let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
+    async fn run(&self, port: u32) {
+        let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
 
         self.logger.info(&format!(
@@ -61,6 +73,26 @@ impl Server {
                     peer_location: None,
                 }
             });
+        }
+    }
+
+    pub async fn start(&self) {
+        let port_pair = self
+            .configuration
+            .pedidos_rust
+            .ports
+            .iter()
+            .find(|pair| pair.id == self.id);
+        match port_pair {
+            Some(port_pair) => {
+                self.run(port_pair.port).await;
+            }
+            None => {
+                self.logger.error(&format!(
+                    "Could not find port in configuration for id: {}",
+                    self.id
+                ));
+            }
         }
     }
 }
