@@ -64,6 +64,13 @@ pub struct AuthorizePayment {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct PaymentExecuted {
+    pub customer_id: u32,
+    pub amount: f64,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct OrderRequest {
     pub customer_id: u32,
     pub restaurant_name: String,

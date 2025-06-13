@@ -41,6 +41,13 @@ pub struct AuthorizePaymentRequest {
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
+pub struct ExecutePayment {
+    pub customer_id: u32,
+    pub price: f64,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
 pub struct OrderToRestaurant {
     pub customer_id: u32,
     pub price: f64,

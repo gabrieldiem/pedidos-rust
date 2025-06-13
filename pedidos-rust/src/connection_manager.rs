@@ -1,16 +1,17 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, FindRider, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    PaymentDenied, RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant, RegisterRider,
-    SendNotification, SendRestaurantList,
+    PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant,
+    RegisterRider, SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery,
-    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
+    FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
+    RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -23,11 +24,20 @@ type RestaurantName = String;
 pub struct CustomerData {
     pub address: Addr<ClientConnection>,
     pub location: Location,
+    pub order_price: Option<f64>,
 }
 
 impl CustomerData {
-    pub fn new(address: Addr<ClientConnection>, location: Location) -> CustomerData {
-        CustomerData { address, location }
+    pub fn new(
+        address: Addr<ClientConnection>,
+        location: Location,
+        order_price: Option<f64>,
+    ) -> CustomerData {
+        CustomerData {
+            address,
+            location,
+            order_price,
+        }
     }
 }
 
@@ -125,7 +135,7 @@ impl Handler<RegisterCustomer> for ConnectionManager {
             .debug(&format!("Registering Customer with ID {}", msg.id));
         self.customers
             .entry(msg.id)
-            .or_insert(CustomerData::new(msg.address, msg.location));
+            .or_insert(CustomerData::new(msg.address, msg.location, None));
         self.process_pending_requests();
     }
 }
@@ -291,6 +301,12 @@ impl Handler<OrderRequest> for ConnectionManager {
             "Preparing order for customer {} at restaurant {} with price {}",
             msg.customer_id, msg.restaurant_name, msg.order_price
         ));
+        if let Some(customer) = self.customers.get_mut(&msg.customer_id) {
+            customer.order_price = Some(msg.order_price);
+        } else {
+            self.logger
+                .warn("Failed to find customer data when preparing order");
+        }
         if let Some(restaurant) = self.restaurants.get(&msg.restaurant_name) {
             restaurant.address.do_send(OrderToRestaurant {
                 customer_id: msg.customer_id,
@@ -466,9 +482,16 @@ impl Handler<DeliveryDone> for ConnectionManager {
                     Some(customer) => match self.orders_in_process.remove(&msg.rider_id) {
                         Some(_) => {
                             self.logger.debug("Removed finished order");
-                            customer.address.do_send(FinishDelivery {
-                                reason: "Delivery completed successfully".to_string(),
-                            });
+                            let execute_payment_msg = ExecutePayment {
+                                customer_id,
+                                price: customer.order_price.unwrap_or(0.0),
+                            };
+                            if let Some(payment_system) = &self.payment_system {
+                                payment_system.do_send(execute_payment_msg);
+                            } else {
+                                self.logger
+                                    .warn("Failed to find payment system when finishing delivery");
+                            }
                         }
                         None => {
                             self.logger.debug("No order found to be removed");
@@ -485,5 +508,28 @@ impl Handler<DeliveryDone> for ConnectionManager {
                 self.logger.warn("Failed finding order in progress");
             }
         }
+    }
+}
+
+#[async_handler]
+impl Handler<PaymentExecuted> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: PaymentExecuted, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Payment executed for customer {} with amount {}",
+            msg.customer_id, msg.amount
+        ));
+
+        if let Some(customer) = self.customers.get(&msg.customer_id) {
+            let reason_msg = format!("Payment successfully executed for order of {}.", msg.amount,);
+            customer.address.do_send(FinishDelivery {
+                reason: reason_msg.clone(),
+            });
+        } else {
+            self.logger
+                .warn("Failed to find customer data when denying payment");
+        }
+        self.process_pending_requests();
     }
 }
