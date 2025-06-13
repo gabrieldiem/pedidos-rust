@@ -96,7 +96,10 @@ impl Handler<ChooseRestaurant> for Customer {
         }
 
         let chosen_restaurant = &restaurants[0];
-        let order_price = rand::rng().random_range(100.0..=1000.0);
+
+        let raw_price: f64 = rand::rng().random_range(100.0..=1000.0);
+        let order_price = (raw_price * 1000.0).round() / 1000.0;
+
         let order = OrderContent::new(chosen_restaurant.clone(), order_price);
         _ctx.address().do_send(Order { order });
     }
@@ -140,6 +143,7 @@ impl Handler<FinishDelivery> for Customer {
         self.logger.info(_msg.reason.as_str());
 
         _ctx.address().do_send(Stop);
+        // TODO: que pueda hacer otro pedido, o que al menos mate este proceso
     }
 }
 

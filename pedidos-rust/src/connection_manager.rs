@@ -218,7 +218,7 @@ impl Handler<AuthorizePayment> for ConnectionManager {
         } else {
             self.logger
                 .warn("Failed to find payment system when authorizing payment");
-            // TODO: Delivery Done al customer con el mensaje de que no anda el sistema de pago y lo vuelva a intentar mas tarde
+            // TODO: FinishDelivery al customer con el mensaje de que no anda el sistema de pago y lo vuelva a intentar mas tarde
         }
         self.process_pending_requests();
     }
@@ -307,7 +307,7 @@ impl Handler<OrderReady> for ConnectionManager {
     fn handle(&mut self, msg: OrderReady, ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer) = self.customers.get(&msg.customer_id) {
             let notification_msg =
-                "Your order is ready! We are going to find a rider for you".to_string();
+                "Your order is ready! Finding a rider for you order...".to_string();
             customer.address.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });
@@ -426,6 +426,7 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
     }
 }
 
+// TODO: se debe ejecutar el pago antes de enviar FinishDelivery
 #[async_handler]
 impl Handler<DeliveryDone> for ConnectionManager {
     type Result = ();

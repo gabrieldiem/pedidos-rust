@@ -210,7 +210,7 @@ impl Handler<OrderInProgress> for ClientConnection {
         ));
 
         let message = SendNotification {
-            message: "Your order is in progress".to_string(),
+            message: "Your order is being prepared by the restaurant".to_string(),
             recipient_id: msg.customer_id,
         };
         self.connection_manager.do_send(message);
