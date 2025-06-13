@@ -1,7 +1,7 @@
 use crate::connection_manager::ConnectionManager;
 use crate::messages::{
     AuthorizePayment, OrderCancelled, OrderReady, PaymentAuthorized, PaymentDenied,
-    RegisterPaymentSystem, SendNotification,
+    PaymentExecuted, RegisterPaymentSystem, SendNotification,
 };
 use crate::messages::{RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList};
 use actix::{
@@ -10,9 +10,9 @@ use actix::{
 };
 use actix_async_handler::async_handler;
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, FinishDelivery,
-    Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant, PushNotification,
-    Restaurants, RiderArrivedAtCustomer, SocketMessage,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
+    FinishDelivery, Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant,
+    PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -162,6 +162,24 @@ impl Handler<AuthorizePaymentRequest> for ClientConnection {
         ));
 
         let msg = SocketMessage::AuthorizePayment(msg.customer_id, msg.price, msg.restaurant_name);
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<ExecutePayment> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, msg: ExecutePayment, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Executing payment with payment system for customer {} with price {}",
+            msg.customer_id, msg.price
+        ));
+
+        let msg = SocketMessage::ExecutePayment(msg.customer_id, msg.price);
         if let Err(e) = self.send_message(&msg) {
             self.logger.error(&e.to_string());
             return;
@@ -382,6 +400,12 @@ impl ClientConnection {
                         amount,
                         restaurant_name,
                     })
+                }
+                SocketMessage::PaymentExecuted(customer_id, amount) => {
+                    self.connection_manager.do_send(PaymentExecuted {
+                        customer_id,
+                        amount,
+                    });
                 }
                 _ => {
                     self.logger
