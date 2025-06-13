@@ -6,7 +6,7 @@ use common::protocol::{Location, SocketMessage};
 use common::tcp::tcp_message::TcpMessage;
 use common::utils::logger::Logger;
 use rand::{Rng, random};
-use std::{error::Error, sync::Arc, time::Duration};
+use std::{env, error::Error, sync::Arc, time::Duration};
 use tokio::net::TcpStream;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, split},
@@ -81,10 +81,68 @@ async fn handle_order(
     Ok(())
 }
 
+async fn inform_location(
+    writer: &Arc<Mutex<tokio::io::WriteHalf<TcpStream>>>,
+    logger: &Logger,
+    restaurant: &Restaurant,
+) -> Result<(), Box<dyn Error>> {
+    let location_msg = SocketMessage::InformLocation(restaurant.location, restaurant.name.clone());
+    let tcp_message = TcpMessage::from_serialized_json(&location_msg)?;
+
+    let mut writer_guard = writer.lock().await;
+    writer_guard
+        .write_all(tcp_message.data.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to send InformLocation: {}", e))?;
+
+    logger.info(&format!(
+        "Informed location '{}' at ({}, {}) to PedidosRust",
+        restaurant.name, restaurant.location.x, restaurant.location.y
+    ));
+
+    Ok(())
+}
+
+/// Parses the restaurant's information from the command line arguments.
+///
+/// Expects three arguments in the following order:
+/// 1. Restaurant name (`String`)
+/// 2. X coordinate (`u16`)
+/// 3. Y coordinate (`u16`)
+///
+/// # Errors
+///
+/// Returns an error if any argument is missing or if the coordinates cannot be parsed as `u16`.
+///
+/// # Returns
+///
+/// A `Restaurant` struct with the provided name and location.
+fn parse_restaurant_from_args() -> Result<Restaurant, Box<dyn Error>> {
+    let mut args = env::args().skip(1); // Skip program name
+
+    let name = args.next().ok_or("Missing restaurant name")?;
+    let x_str = args.next().ok_or("Missing x coordinate")?;
+    let y_str = args.next().ok_or("Missing y coordinate")?;
+
+    let x: u16 = x_str
+        .parse()
+        .map_err(|_| format!("Invalid x coordinate: {}", x_str))?;
+    let y: u16 = y_str
+        .parse()
+        .map_err(|_| format!("Invalid y coordinate: {}", y_str))?;
+
+    Ok(Restaurant {
+        name,
+        location: Location::new(x, y),
+    })
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[RESTAURANT]"));
     logger.info("Starting...");
+
+    let restaurant = parse_restaurant_from_args()?;
 
     let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
     let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
@@ -95,24 +153,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let (reader_half, writer_half) = split(stream);
     let writer = Arc::new(Mutex::new(writer_half));
 
-    {
-        // Informing location to PedidosRust
-        let restaurant_data = Restaurant {
-            location: Location::new(9, 9),
-            name: "Mostaza".to_string(),
-        };
-        let location_msg =
-            SocketMessage::InformLocation(restaurant_data.location, restaurant_data.name);
-        let tcp_message = TcpMessage::from_serialized_json(&location_msg)?;
-
-        let mut writer_guard = writer.lock().await;
-        writer_guard
-            .write_all(tcp_message.data.as_bytes())
-            .await
-            .map_err(|e| format!("Failed to send InformLocation: {}", e))?;
-
-        logger.info("Informed location to PedidosRust. Ready to receive orders...");
-    }
+    inform_location(&writer, &logger, &restaurant).await?;
 
     let reader = BufReader::new(reader_half);
     let mut lines = reader.lines();
