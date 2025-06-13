@@ -306,7 +306,8 @@ impl Handler<OrderReady> for ConnectionManager {
 
     fn handle(&mut self, msg: OrderReady, ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer) = self.customers.get(&msg.customer_id) {
-            let notification_msg = "Your order is ready!";
+            let notification_msg =
+                "Your order is ready! We are going to find a rider for you".to_string();
             customer.address.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });

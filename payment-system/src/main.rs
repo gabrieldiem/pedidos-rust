@@ -66,7 +66,7 @@ async fn execute_payment(
 
     Ok(())
 }
-
+// TODO: QUE LE ENVIE UN MENSAJE DE REGISTRARSE PRIMERO AL PR
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[PAYMENT-SYSTEM]"));
@@ -80,6 +80,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let (reader_half, writer_half) = split(stream);
     let writer = Arc::new(Mutex::new(writer_half));
+
+    // Enviar mensaje de registro al PR
+    let register_msg = SocketMessage::RegisterPaymentSystem;
+    let tcp_message = TcpMessage::from_serialized_json(&register_msg)?;
+    {
+        let mut writer = writer.lock().await;
+        writer
+            .write_all(tcp_message.data.as_bytes())
+            .await
+            .map_err(|e| format!("Failed to send register message: {}", e))?;
+    }
+
     let reader = BufReader::new(reader_half);
     let mut lines = reader.lines();
 
