@@ -19,7 +19,6 @@ use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::io;
 
-#[allow(dead_code)]
 pub struct ClientConnection {
     pub is_leader: bool,
     pub tcp_sender: Addr<TcpSender>,

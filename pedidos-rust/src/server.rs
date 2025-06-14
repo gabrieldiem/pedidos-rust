@@ -2,11 +2,14 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
+use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
 use common::constants::DEFAULT_PR_HOST;
+use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpListener;
@@ -32,8 +35,6 @@ impl Server {
     pub async fn new(id: u32, logger: Logger) -> Result<Server, Box<dyn std::error::Error>> {
         let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new());
         let configuration = Configuration::new()?;
-        let hearbeat_monitor =
-            HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
         let port_pair = configuration
             .pedidos_rust
@@ -69,6 +70,16 @@ impl Server {
                 return Err(msg.into());
             }
         };
+        let server_peers = Self::connect_server_peers(
+            id,
+            my_port,
+            configuration.clone(),
+            &logger,
+            connection_manager.clone(),
+        )
+        .await?;
+        let hearbeat_monitor =
+            HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
         Ok(Server {
             id,
@@ -80,6 +91,55 @@ impl Server {
             leader_port: Arc::new(Mutex::new(leader_port)),
             port: my_port,
         })
+    }
+
+    async fn connect_server_peers(
+        id: u32,
+        my_port: u32,
+        configuration: Configuration,
+        logger: &Logger,
+        connection_manager: Addr<ConnectionManager>,
+    ) -> Result<HashMap<u32, Addr<ServerPeer>>, Box<dyn std::error::Error>> {
+        let mut server_peers: HashMap<u32, Addr<ServerPeer>> = HashMap::new();
+
+        for port_pair in configuration.pedidos_rust.ports {
+            let port = port_pair.port;
+            if port == id {
+                continue;
+            }
+
+            let tcp_connector = TcpConnector::new(my_port, vec![port]);
+            let stream = match tcp_connector.connect().await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    continue;
+                }
+            };
+
+            let peer = ServerPeer::create(|ctx| {
+                let (read_half, write_half) = split(stream);
+
+                ServerPeer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
+
+                let tcp_sender = TcpSender {
+                    write_stream: Some(write_half),
+                }
+                .start();
+
+                logger.debug("Created ServerPeer");
+
+                ServerPeer {
+                    tcp_sender,
+                    logger: Logger::new(Some(&format!("[PEER-{port}]"))),
+                    port,
+                    connection_manager: connection_manager.clone(),
+                }
+            });
+
+            server_peers.insert(port, peer);
+        }
+
+        Ok(server_peers)
     }
 
     fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {

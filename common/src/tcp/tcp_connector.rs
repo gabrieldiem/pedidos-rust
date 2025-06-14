@@ -17,7 +17,7 @@ impl Actor for TcpConnector {
 
 /// Iterates through a list of ports until it can connect with 1
 impl TcpConnector {
-    const MAX_WAITING_PERIOD_UDP_IN_SECONDS: u64 = 2;
+    const MAX_WAITING_PERIOD_UDP_IN_SECONDS: u64 = 1;
     const MAX_CONNECTION_PASSES: u64 = 3;
 
     pub fn new(source_port: u32, dest_ports: Vec<u32>) -> TcpConnector {

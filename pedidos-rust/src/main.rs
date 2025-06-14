@@ -9,6 +9,7 @@ mod heartbeat;
 mod messages;
 mod nearby_entitys;
 mod server;
+mod server_peer;
 
 fn parse_args() -> u32 {
     let args: Vec<String> = env::args().collect();
