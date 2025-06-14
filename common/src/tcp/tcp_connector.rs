@@ -64,8 +64,7 @@ impl Handler<Reconnect> for TcpConnector {
                     let index = (start_index + offset) % total_ports;
                     let port = dest_ports[index];
 
-                    // Note: You'll need to move try_connection logic here or make it static
-                    // since we can't call self methods in this async block
+                    // Needs to be static
                     match Self::try_connection(port, &socket, &logger.clone()).await {
                         Ok(port) => {
                             logger.debug(&format!("Found port to connect to: {}", port));
@@ -146,7 +145,7 @@ impl TcpConnector {
         let timeout_duration = tokio::time::Duration::from_secs(2);
 
         match tokio::time::timeout(timeout_duration, socket.recv_from(&mut buf)).await {
-            Ok(Ok((size, src))) => {
+            Ok(Ok((size, _src_address))) => {
                 let received_msg = Self::deserialize_message(&buf, size)?;
                 match received_msg {
                     SocketMessage::ConnectionAvailable => Ok(port),
@@ -175,50 +174,4 @@ impl TcpConnector {
             }
         }
     }
-
-    // pub async fn reset_connection(
-    //     &self,
-    //     connected_port: u32,
-    // ) -> Result<TcpStream, Box<dyn std::error::Error>> {
-    //     self.logger.info("Resetting connection...");
-    //
-    //     let start_index = match self.dest_ports.iter().position(|&p| p == connected_port) {
-    //         Some(index) => index,
-    //         None => return Err("Connected port not found in destination ports".into()),
-    //     };
-    //
-    //     let total_ports = self.dest_ports.len();
-    //     for offset in 0..total_ports {
-    //         let index = (start_index + offset) % total_ports;
-    //         let port = self.dest_ports[index];
-    //
-    //         self.try_connection(port).await;
-    //         let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
-    //
-    //         let socket = TcpSocket::new_v4()?;
-    //         socket.set_reuseaddr(true)?;
-    //
-    //         let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.source_port as u16);
-    //         self.logger.debug("Binding");
-    //
-    //         std::thread::sleep(std::time::Duration::from_secs(5));
-    //         socket.bind(local_addr)?;
-    //
-    //         match socket.connect(server_sockaddr.parse()?).await {
-    //             Ok(stream) => {
-    //                 self.logger
-    //                     .info(&format!("Using address {}", stream.local_addr()?));
-    //                 self.logger
-    //                     .info(&format!("Connected to server {}", server_sockaddr));
-    //                 return Ok(stream);
-    //             }
-    //             Err(e) => {
-    //                 self.logger
-    //                     .warn(&format!("Failed to connect to {}: {}", server_sockaddr, e));
-    //             }
-    //         }
-    //     }
-    //
-    //     Err("Could not connect to any server".into())
-    // }
 }

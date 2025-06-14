@@ -140,8 +140,8 @@ impl Server {
         ));
 
         let logger_clone = self.logger.clone();
-        let port_clone = self.port.clone();
-        let is_leader_clone = self.is_leader.clone();
+        let port_clone = self.port;
+        let is_leader_clone = self.is_leader;
         spawn(async move {
             if let Err(e) = Self::run_udp_loop(port_clone, logger_clone, is_leader_clone).await {
                 eprintln!("UDP loop error: {}", e);
