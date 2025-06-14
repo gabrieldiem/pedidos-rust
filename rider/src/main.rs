@@ -1,12 +1,13 @@
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
+use std::error::Error;
 
 use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT};
 use common::protocol::{DeliveryOffer, Location, LocationUpdate, SocketMessage};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
-use std::io;
+use std::{env, io};
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpStream;
 use tokio::time::{Duration, sleep};
@@ -236,10 +237,41 @@ impl Rider {
     }
 }
 
+/// Parses the rider's information from the command line arguments.
+///
+/// Expects three arguments in the following order:
+/// 1. X coordinate (`u16`)
+/// 2. Y coordinate (`u16`)
+///
+/// # Errors
+///
+/// Returns an error if any argument is missing or if the coordinates cannot be parsed as `u16`.
+///
+/// # Returns
+///
+/// A `Restaurant` struct with the provided location.
+fn parse_args() -> Result<Location, Box<dyn Error>> {
+    let mut args = env::args().skip(1); // Skip program name
+
+    let x_str = args.next().ok_or("Missing x coordinate")?;
+    let y_str = args.next().ok_or("Missing y coordinate")?;
+
+    let x: u16 = x_str
+        .parse()
+        .map_err(|_| format!("Invalid x coordinate: {}", x_str))?;
+    let y: u16 = y_str
+        .parse()
+        .map_err(|_| format!("Invalid y coordinate: {}", y_str))?;
+
+    Ok(Location::new(x, y))
+}
+
 #[actix_rt::main]
 async fn main() -> io::Result<()> {
     let logger = Logger::new(Some("[RIDER]"));
     logger.info("Starting...");
+
+    let starting_location = parse_args().expect("Error al parsear los argumentos");
 
     let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
     let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
@@ -257,7 +289,6 @@ async fn main() -> io::Result<()> {
         .start();
 
         logger.debug("Created Rider");
-        let starting_location = Location::new(5, 6);
         Rider {
             tcp_sender,
             logger: Logger::new(Some("[RIDER]")),
