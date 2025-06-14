@@ -11,14 +11,15 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
-    FinishDelivery, IsConnectionReady, Location, LocationUpdate, Order, OrderInProgress,
-    OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage, Stop,
+    FinishDelivery, Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant,
+    PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage, Stop,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::io;
 
+#[allow(dead_code)]
 pub struct ClientConnection {
     pub is_leader: bool,
     pub tcp_sender: Addr<TcpSender>,
@@ -329,34 +330,6 @@ impl Handler<Stop> for ClientConnection {
     }
 }
 
-#[async_handler]
-impl Handler<IsConnectionReady> for ClientConnection {
-    type Result = ();
-
-    async fn handle(&mut self, _msg: IsConnectionReady, _ctx: &mut Self::Context) -> Self::Result {
-        match self.is_leader {
-            true => {
-                self.logger
-                    .debug("Connection is available, entity is leader");
-                if let Err(e) = self.send_message(&SocketMessage::ConnectionAvailable) {
-                    self.logger.error(&e.to_string());
-                    return;
-                }
-            }
-            false => {
-                self.logger
-                    .debug("Connection is not available, entity is not leader");
-                if let Err(e) = self.send_message(&SocketMessage::ConnectionNotAvailable(1)) {
-                    self.logger.error(&e.to_string());
-                    return;
-                }
-
-                _ctx.address().do_send(Stop {});
-            }
-        }
-    }
-}
-
 impl ClientConnection {
     #[allow(unreachable_patterns)]
     fn dispatch_message(
@@ -445,9 +418,6 @@ impl ClientConnection {
                         customer_id,
                         amount,
                     });
-                }
-                SocketMessage::IsConnectionReady => {
-                    ctx.address().do_send(IsConnectionReady {});
                 }
                 _ => {
                     self.logger

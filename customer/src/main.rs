@@ -1,6 +1,8 @@
 use crate::customer::{Customer, Start};
 use actix::Addr;
+use common::utils::logger::Logger;
 use std::{env, process};
+
 mod customer;
 
 fn parse_args() -> u32 {
@@ -32,17 +34,16 @@ async fn run(customer: Addr<Customer>) -> std::io::Result<()> {
 #[actix_rt::main]
 async fn main() {
     let id = parse_args();
+    let logger = Logger::new(Some("[CUSTOMER]"));
 
-    match Customer::new(id).await {
+    match Customer::new(id, logger.clone()).await {
         Ok(customer) => {
             if let Err(error) = run(customer).await {
-                eprintln!("Customer failed to start");
-                eprintln!("{}", error);
+                logger.error(&format!("Customer failed: {error}"));
             }
         }
         Err(error) => {
-            eprintln!("Customer failed to start");
-            eprintln!("{}", error);
+            logger.error(&format!("Customer failed to start: {error}"));
         }
     }
 }

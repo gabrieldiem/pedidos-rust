@@ -26,10 +26,9 @@ pub struct Server {
 }
 
 impl Server {
-    pub async fn new(id: u32) -> Result<Server, Box<dyn std::error::Error>> {
-        let logger_prefix = format!("[PEDIDOS-RUST-{}]", id);
-        let logger = Logger::new(Some(&logger_prefix));
+    const INITIAL_LEADER_ID: u32 = 1;
 
+    pub async fn new(id: u32, logger: Logger) -> Result<Server, Box<dyn std::error::Error>> {
         let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new());
         let configuration = Configuration::new()?;
         let hearbeat_monitor =
@@ -50,7 +49,7 @@ impl Server {
             }
         };
 
-        let is_leader = id == 1;
+        let is_leader = id == Self::INITIAL_LEADER_ID;
 
         Ok(Server {
             id,
@@ -78,23 +77,30 @@ impl Server {
     }
 
     async fn send_connection_answer(
+        logger: &Logger,
         socket: &UdpSocket,
         addr: SocketAddr,
         is_leader: bool,
+        leader_port: u32,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let msg: String = if is_leader {
+            logger.debug("Instance is leader. Connection available");
             Self::serialize_message(SocketMessage::ConnectionAvailable)?
         } else {
-            Self::serialize_message(SocketMessage::ConnectionNotAvailable(1))?
+            logger.debug(&format!(
+                "Instance is not leader. Connection refused. Leader is: {leader_port}"
+            ));
+            Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
         };
         socket.send_to(msg.as_bytes(), addr).await?;
         Ok(())
     }
 
-    async fn run_udp_loop(
+    async fn run_connection_gateway_loop(
         port: u32,
         logger: Logger,
         is_leader: bool,
+        leader_port: u32,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port as u16);
 
@@ -106,9 +112,12 @@ impl Server {
             }
         };
 
-        logger.info(&format!("UDP server listening on {}", local_addr));
+        logger.info(&format!(
+            "Connection Gateway over UDP listening on {}",
+            local_addr
+        ));
 
-        let mut buf = [0; 1024];
+        let mut buf = [0; 2048];
 
         loop {
             match socket.recv_from(&mut buf).await {
@@ -116,7 +125,15 @@ impl Server {
                     let received_msg = Self::deserialize_message(&buf, size)?;
                     match received_msg {
                         SocketMessage::IsConnectionReady => {
-                            Self::send_connection_answer(&socket, addr, is_leader).await?;
+                            logger.debug("Received connection probe");
+                            Self::send_connection_answer(
+                                &logger,
+                                &socket,
+                                addr,
+                                is_leader,
+                                leader_port,
+                            )
+                            .await?;
                         }
                         _ => {
                             logger.warn(&format!("Unrecognized message: {:?}", received_msg));
@@ -130,7 +147,42 @@ impl Server {
         }
     }
 
-    pub async fn run(&self) {
+    fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let logger = Logger::new(Some("[CONN-GATEWAY]"));
+        let port_clone = self.port;
+        let is_leader_clone = self.is_leader;
+        let port_pair = self
+            .configuration
+            .pedidos_rust
+            .ports
+            .iter()
+            .find(|pair| pair.id == Self::INITIAL_LEADER_ID);
+
+        let leader_port: u32 = match port_pair {
+            Some(port_pair) => port_pair.port,
+            None => {
+                let msg = format!(
+                    "Could not find port in configuration for id: {}",
+                    Self::INITIAL_LEADER_ID
+                );
+                self.logger.error(&msg);
+                return Err(msg.into());
+            }
+        };
+
+        spawn(async move {
+            if let Err(e) =
+                Self::run_connection_gateway_loop(port_clone, logger, is_leader_clone, leader_port)
+                    .await
+            {
+                eprintln!("UDP loop error: {}", e);
+            }
+        });
+
+        Ok(())
+    }
+
+    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
 
@@ -139,14 +191,7 @@ impl Server {
             sockaddr_str.clone()
         ));
 
-        let logger_clone = self.logger.clone();
-        let port_clone = self.port;
-        let is_leader_clone = self.is_leader;
-        spawn(async move {
-            if let Err(e) = Self::run_udp_loop(port_clone, logger_clone, is_leader_clone).await {
-                eprintln!("UDP loop error: {}", e);
-            }
-        });
+        self.run_connection_gateway()?;
 
         while let Ok((stream, client_sockaddr)) = listener.accept().await {
             self.logger
@@ -176,5 +221,7 @@ impl Server {
                 }
             });
         }
+
+        Ok(())
     }
 }

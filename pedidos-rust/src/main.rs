@@ -1,4 +1,5 @@
 use crate::server::Server;
+use common::utils::logger::Logger;
 use std::{env, process};
 
 mod client_connection;
@@ -28,13 +29,17 @@ fn parse_args() -> u32 {
 #[actix_rt::main]
 async fn main() {
     let id = parse_args();
-    match Server::new(id).await {
+    let logger_prefix = format!("[PEDIDOS-RUST-{}]", id);
+    let logger = Logger::new(Some(&logger_prefix));
+
+    match Server::new(id, logger.clone()).await {
         Ok(server) => {
-            server.run().await;
+            if let Err(e) = server.run().await {
+                logger.error(&format!("Server failed: {e}"));
+            }
         }
         Err(error) => {
-            eprintln!("Server failed to start");
-            eprintln!("{}", error);
+            logger.error(&format!("Server failed to start {error}"));
         }
     }
 }

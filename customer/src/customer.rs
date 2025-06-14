@@ -46,10 +46,9 @@ impl Handler<Start> for Customer {
     type Result = ();
 
     async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.debug("Verifying connection is available");
-        if let Err(e) = self.send_message(&SocketMessage::IsConnectionReady) {
-            self.logger.error(&e.to_string());
-        }
+        _ctx.address().do_send(GetRestaurants {
+            customer_location: self.location,
+        });
     }
 }
 
@@ -183,66 +182,68 @@ impl Handler<FinishDelivery> for Customer {
 }
 
 impl Customer {
-    pub async fn new(id: u32) -> Result<Addr<Customer>, Box<dyn std::error::Error>> {
-        let logger = Logger::new(Some("[CUSTOMER]"));
+    pub async fn new(
+        id: u32,
+        logger: Logger,
+    ) -> Result<Addr<Customer>, Box<dyn std::error::Error>> {
         logger.info("Starting...");
 
+        // Setting up ports
         let config = Configuration::new()?;
         let port_pair = config.customer.ports.iter().find(|pair| pair.id == id);
 
-        match port_pair {
-            Some(port_pair) => {
-                let my_port = port_pair.port;
-                let dest_ports: Vec<u32> = config
-                    .pedidos_rust
-                    .ports
-                    .iter()
-                    .map(|pair| pair.port)
-                    .collect();
-                let tcp_connector = TcpConnector::new(my_port, dest_ports.clone());
-                let stream = tcp_connector.connect().await?;
-                match stream.peer_addr() {
-                    Ok(peer_addr) => {
-                        let customer = Customer::create(|ctx| {
-                            let (read_half, write_half) = split(stream);
-
-                            Customer::add_stream(
-                                LinesStream::new(BufReader::new(read_half).lines()),
-                                ctx,
-                            );
-
-                            let tcp_sender = TcpSender {
-                                write_stream: Some(write_half),
-                            }
-                            .start();
-
-                            logger.debug("Created Customer");
-
-                            let tcp_connector_actor =
-                                TcpConnector::create(|_tcp_ctx| TcpConnector {
-                                    logger: Logger::new(Some("TCP-CONNECTOR")),
-                                    source_port: my_port,
-                                    dest_ports: dest_ports.clone(),
-                                });
-
-                            let customer_location = Location::new(10, 10);
-                            Customer {
-                                tcp_sender,
-                                logger: Logger::new(Some("[CUSTOMER]")),
-                                location: customer_location,
-                                config,
-                                my_port,
-                                peer_port: peer_addr.port() as u32,
-                                tcp_connector: tcp_connector_actor,
-                            }
-                        });
-                        Ok(customer)
-                    }
-                    Err(e) => Err(e.into()),
-                }
+        let port_pair = match port_pair {
+            Some(pair) => pair,
+            None => {
+                return Err(format!("Could not find port in configuration for id: {}", id).into());
             }
-            None => Err(format!("Could not find port in configuration for id: {}", id).into()),
-        }
+        };
+
+        let my_port = port_pair.port;
+        let dest_ports: Vec<u32> = config
+            .pedidos_rust
+            .ports
+            .iter()
+            .map(|pair| pair.port)
+            .collect();
+
+        // Setting up connection
+        let tcp_connector = TcpConnector::new(my_port, dest_ports.clone());
+        let stream = tcp_connector.connect().await?;
+        let peer_address = stream.peer_addr()?;
+        let peer_port = peer_address.port();
+
+        // Creating actor
+        let customer = Customer::create(|ctx| {
+            let (read_half, write_half) = split(stream);
+
+            Customer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
+
+            let tcp_sender = TcpSender {
+                write_stream: Some(write_half),
+            }
+            .start();
+
+            logger.debug("Created Customer");
+
+            let tcp_connector_actor = TcpConnector::create(|_tcp_ctx| TcpConnector {
+                logger: Logger::new(Some("[TCP-CONNECTOR]")),
+                source_port: my_port,
+                dest_ports: dest_ports.clone(),
+            });
+
+            let customer_location = Location::new(10, 10);
+            Customer {
+                tcp_sender,
+                logger: Logger::new(Some("[CUSTOMER]")),
+                location: customer_location,
+                config,
+                my_port,
+                peer_port: peer_port as u32,
+                tcp_connector: tcp_connector_actor,
+            }
+        });
+        Ok(customer)
     }
 
     #[allow(unreachable_patterns)]
