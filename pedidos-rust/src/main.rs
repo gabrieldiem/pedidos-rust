@@ -3,6 +3,7 @@ use common::utils::logger::Logger;
 use std::{env, process};
 
 mod client_connection;
+mod connection_gateway;
 mod connection_manager;
 mod heartbeat;
 mod messages;
