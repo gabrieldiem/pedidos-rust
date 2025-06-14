@@ -4,8 +4,8 @@ use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::constants::{MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS};
 use common::protocol::{
-    ConnectionAvailable, ConnectionNotAvailable, FinishDelivery, GetRestaurants, Location, Order,
-    OrderContent, PushNotification, Reconnect, SocketMessage, Stop,
+    FinishDelivery, GetRestaurants, Location, Order, OrderContent, PushNotification, SocketMessage,
+    Stop,
 };
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
@@ -49,38 +49,6 @@ impl Handler<Start> for Customer {
         _ctx.address().do_send(GetRestaurants {
             customer_location: self.location,
         });
-    }
-}
-
-#[async_handler]
-impl Handler<ConnectionAvailable> for Customer {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _msg: ConnectionAvailable,
-        _ctx: &mut Self::Context,
-    ) -> Self::Result {
-        self.logger.debug("Connection available");
-        _ctx.address().do_send(GetRestaurants {
-            customer_location: self.location,
-        });
-    }
-}
-
-#[async_handler]
-impl Handler<ConnectionNotAvailable> for Customer {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _msg: ConnectionNotAvailable,
-        _ctx: &mut Self::Context,
-    ) -> Self::Result {
-        self.logger.debug("Connection unavailable");
-        self.tcp_connector.do_send(Reconnect {
-            current_connected_port: self.peer_port,
-        })
     }
 }
 
@@ -261,13 +229,6 @@ impl Customer {
                 }
                 SocketMessage::FinishDelivery(reason) => {
                     ctx.address().do_send(FinishDelivery { reason });
-                }
-                SocketMessage::ConnectionAvailable => {
-                    ctx.address().do_send(ConnectionAvailable {});
-                }
-                SocketMessage::ConnectionNotAvailable(port_to_connect) => {
-                    ctx.address()
-                        .do_send(ConnectionNotAvailable { port_to_connect });
                 }
                 _ => {
                     self.logger

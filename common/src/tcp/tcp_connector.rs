@@ -1,7 +1,7 @@
 use crate::constants::DEFAULT_PR_HOST;
-use crate::protocol::{ConnectTo, Reconnect, SocketMessage};
+use crate::protocol::SocketMessage;
 use crate::utils::logger::Logger;
-use actix::{Actor, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
+use actix::{Actor, Context};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 
@@ -13,72 +13,6 @@ pub struct TcpConnector {
 
 impl Actor for TcpConnector {
     type Context = Context<Self>;
-}
-
-impl Handler<ConnectTo> for TcpConnector {
-    type Result = ();
-    fn handle(&mut self, msg: ConnectTo, _ctx: &mut Self::Context) -> Self::Result {
-        let port = msg.port;
-        self.logger.debug(&format!("Connecting with {port}"));
-        // let local_addr =
-        //     SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.source_port as u16);
-        // let dest_ports = self.dest_ports.clone();
-        // let logger = self.logger.clone();
-        // let address = _ctx.address();
-    }
-}
-
-impl Handler<Reconnect> for TcpConnector {
-    type Result = ResponseActFuture<Self, ()>;
-
-    fn handle(&mut self, msg: Reconnect, _ctx: &mut Self::Context) -> Self::Result {
-        let connected_port = msg.current_connected_port;
-        let local_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.source_port as u16);
-        let dest_ports = self.dest_ports.clone();
-        let logger = self.logger.clone();
-        let address = _ctx.address();
-
-        Box::pin(
-            async move {
-                logger.debug("Starting reconnection");
-
-                let socket = match UdpSocket::bind(local_addr).await {
-                    Ok(socket) => socket,
-                    Err(e) => {
-                        logger.error(&format!("Could not get UDP socket: {e}"));
-                        return;
-                    }
-                };
-
-                let start_index = match dest_ports.iter().position(|&p| p == connected_port) {
-                    Some(index) => index,
-                    None => {
-                        logger.error("Connected port not found in destination ports");
-                        return;
-                    }
-                };
-
-                let total_ports = dest_ports.len();
-                for offset in 0..total_ports {
-                    let index = (start_index + offset) % total_ports;
-                    let port = dest_ports[index];
-
-                    // Needs to be static
-                    match Self::try_connection(port, &socket, &logger.clone()).await {
-                        Ok(port) => {
-                            logger.debug(&format!("Found port to connect to: {}", port));
-                            address.do_send(ConnectTo { port })
-                        }
-                        Err(e) => {
-                            logger.warn(&format!("Failed to connect to port {}: {}", port, e));
-                        }
-                    }
-                }
-            }
-            .into_actor(self),
-        )
-    }
 }
 
 /// Iterates through a list of ports until it can connect with 1
