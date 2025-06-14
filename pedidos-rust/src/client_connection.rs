@@ -346,7 +346,7 @@ impl Handler<IsConnectionReady> for ClientConnection {
             false => {
                 self.logger
                     .debug("Connection is not available, entity is not leader");
-                if let Err(e) = self.send_message(&SocketMessage::ConnectionNotAvailable) {
+                if let Err(e) = self.send_message(&SocketMessage::ConnectionNotAvailable(1)) {
                     self.logger.error(&e.to_string());
                     return;
                 }

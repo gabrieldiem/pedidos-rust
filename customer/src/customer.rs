@@ -1,21 +1,22 @@
+use actix::ActorFutureExt;
 use common::constants::{MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS};
 use common::utils::logger::Logger;
 
-use actix::{Actor, ActorContext, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
+use actix::prelude::*;
+use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::protocol::{
     ConnectionAvailable, ConnectionNotAvailable, FinishDelivery, GetRestaurants, Location, Order,
-    OrderContent, PushNotification, SocketMessage, Stop,
+    OrderContent, PushNotification, Reconnect, SocketMessage, Stop,
 };
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use rand::Rng;
 use std::io;
-use tokio::io::{AsyncBufReadExt, BufReader, Lines, ReadHalf, split};
-use tokio::net::TcpStream;
+use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio_stream::wrappers::LinesStream;
 
 #[allow(dead_code)]
@@ -26,6 +27,7 @@ pub struct Customer {
     config: Configuration,
     my_port: u32,
     peer_port: u32,
+    tcp_connector: Addr<TcpConnector>,
 }
 
 impl Actor for Customer {
@@ -80,40 +82,36 @@ impl Handler<ConnectionNotAvailable> for Customer {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         self.logger.debug("Connection unavailable");
-
-        let fut = self.reconnect_tcp();
-        let res = fut.await;
-        match res {
-            Ok((lines_stream, tcp_sender, peer_port)) => {
-                //self.finalize_connection(lines_stream, tcp_sender, peer_port, _ctx);
-                _ctx.address().send(Restart {
-                    lines_stream,
-                    tcp_sender,
-                    peer_port,
-                });
-            }
-            Err(e) => {
-                self.logger
-                    .error(&format!("Error trying to replace TCP connection {e}"));
-            }
-        }
+        self.tcp_connector.do_send(Reconnect {
+            current_connected_port: self.peer_port,
+        })
     }
 }
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct Restart {
-    lines_stream: LinesStream<BufReader<ReadHalf<TcpStream>>>,
-    tcp_sender: Addr<TcpSender>,
-    peer_port: u32,
-}
-
-#[async_handler]
-impl Handler<Restart> for Customer {
-    type Result = ();
-
-    async fn handle(&mut self, _msg: Restart, _ctx: &mut Self::Context) -> Self::Result {}
-}
+//
+// #[derive(Message)]
+// #[rtype(result = "()")]
+// struct Restart {
+//     stream: Box<dyn Stream<Item = Result<String, std::io::Error>> + Unpin + Send>,
+//     peer_port: u32,
+// }
+//
+// // Handler for the Restart message
+// impl Handler<Restart> for Customer {
+//     type Result = ();
+//
+//     fn handle(&mut self, msg: Restart, ctx: &mut Self::Context) -> Self::Result {
+//         self.logger.debug("Setting new established connection");
+//
+//         // Add the boxed stream to the actor context
+//         ctx.add_stream(msg.stream);
+//
+//         // Update peer port
+//         self.peer_port = msg.peer_port;
+//
+//         // Send start message
+//         ctx.address().do_send(Start {});
+//     }
+// }
 
 #[async_handler]
 impl Handler<Stop> for Customer {
@@ -223,13 +221,13 @@ impl Customer {
         match port_pair {
             Some(port_pair) => {
                 let my_port = port_pair.port;
-                let dest_ports = config
+                let dest_ports: Vec<u32> = config
                     .pedidos_rust
                     .ports
                     .iter()
                     .map(|pair| pair.port)
                     .collect();
-                let tcp_connector = TcpConnector::new(my_port, dest_ports);
+                let tcp_connector = TcpConnector::new(my_port, dest_ports.clone());
                 let stream = tcp_connector.connect().await?;
                 match stream.peer_addr() {
                     Ok(peer_addr) => {
@@ -240,12 +238,21 @@ impl Customer {
                                 LinesStream::new(BufReader::new(read_half).lines()),
                                 ctx,
                             );
+
                             let tcp_sender = TcpSender {
                                 write_stream: Some(write_half),
                             }
                             .start();
 
                             logger.debug("Created Customer");
+
+                            let tcp_connector_actor =
+                                TcpConnector::create(|tcp_ctx| TcpConnector {
+                                    logger: Logger::new(Some("TCP-CONNECTOR")),
+                                    source_port: my_port,
+                                    dest_ports: dest_ports.clone(),
+                                });
+
                             let customer_location = Location::new(10, 10);
                             Customer {
                                 tcp_sender,
@@ -254,6 +261,7 @@ impl Customer {
                                 config,
                                 my_port,
                                 peer_port: peer_addr.port() as u32,
+                                tcp_connector: tcp_connector_actor,
                             }
                         });
                         Ok(customer)
@@ -265,64 +273,71 @@ impl Customer {
         }
     }
 
-    async fn reconnect_tcp(
-        &mut self,
-    ) -> Result<
-        (
-            LinesStream<BufReader<ReadHalf<TcpStream>>>,
-            Addr<TcpSender>,
-            u32,
-        ),
-        Box<dyn std::error::Error>,
-    > {
-        let dest_ports = self
-            .config
-            .pedidos_rust
-            .ports
-            .iter()
-            .map(|pair| pair.port)
-            .collect();
-
-        self.logger.debug("Stopping TCP Sender");
-        self.tcp_sender
-            .send(Stop {})
-            .await
-            .expect("TCP Sender should have been still alive");
-
-        self.logger.debug("Searching connections");
-        let tcp_connector = TcpConnector::new(self.my_port, dest_ports);
-        let stream = tcp_connector.reset_connection(self.peer_port).await?;
-
-        match stream.peer_addr() {
-            Ok(peer_addr) => {
-                let (read_half, write_half) = split(stream);
-                let lines_stream = LinesStream::new(BufReader::new(read_half).lines());
-                let tcp_sender = TcpSender {
-                    write_stream: Some(write_half),
-                }
-                .start();
-                let peer_port = peer_addr.port() as u32;
-
-                Ok((lines_stream, tcp_sender, peer_port))
-            }
-            Err(e) => Err(e.into()),
-        }
-    }
+    // async fn reconnect_tcp(
+    //     &mut self,
+    // ) -> Result<
+    //     (
+    //         Box<dyn Stream<Item = Result<String, io::Error>> + Unpin + Send>,
+    //         u32,
+    //     ),
+    //     Box<dyn std::error::Error>,
+    // > {
+    //     let dest_ports = self
+    //         .config
+    //         .pedidos_rust
+    //         .ports
+    //         .iter()
+    //         .map(|pair| pair.port)
+    //         .collect();
+    //
+    //     self.logger.debug("Stopping TCP Sender");
+    //     self.tcp_sender
+    //         .send(Stop {})
+    //         .await
+    //         .expect("TCP Sender should have been still alive");
+    //
+    //     self.logger.debug("Searching connections");
+    //     let tcp_connector = TcpConnector::new(self.my_port, dest_ports);
+    //     let stream = tcp_connector.reset_connection(self.peer_port).await?;
+    //
+    //     match stream.peer_addr() {
+    //         Ok(peer_addr) => {
+    //             let (read_half, write_half) = split(stream);
+    //
+    //             // Create and box the lines stream
+    //             let lines_stream = LinesStream::new(BufReader::new(read_half).lines());
+    //             let boxed_stream: Box<
+    //                 dyn Stream<Item = Result<String, std::io::Error>> + Unpin + Send,
+    //             > = Box::new(lines_stream);
+    //
+    //             // Start the TCP sender and store it
+    //             let tcp_sender = TcpSender {
+    //                 write_stream: Some(write_half),
+    //             }
+    //             .start();
+    //             self.tcp_sender = tcp_sender;
+    //
+    //             let peer_port = peer_addr.port() as u32;
+    //
+    //             Ok((boxed_stream, peer_port))
+    //         }
+    //         Err(e) => Err(e.into()),
+    //     }
+    // }
 
     // The sync part that uses context
-    fn finalize_connection(
-        &mut self,
-        lines_stream: LinesStream<BufReader<ReadHalf<TcpStream>>>,
-        tcp_sender: Addr<TcpSender>,
-        peer_port: u32,
-        ctx: &mut Context<Self>,
-    ) {
-        self.logger.debug("Setting new established connection");
-        Customer::add_stream(lines_stream, ctx);
-        self.tcp_sender = tcp_sender;
-        self.peer_port = peer_port;
-    }
-
+    // fn finalize_connection(
+    //     &mut self,
+    //     lines_stream: LinesStream<BufReader<ReadHalf<TcpStream>>>,
+    //     tcp_sender: Addr<TcpSender>,
+    //     peer_port: u32,
+    //     ctx: &mut Context<Self>,
+    // ) {
+    //     self.logger.debug("Setting new established connection");
+    //     Customer::add_stream(lines_stream, ctx);
+    //     self.tcp_sender = tcp_sender;
+    //     self.peer_port = peer_port;
+    // }
     #[allow(unreachable_patterns)]
     fn dispatch_message(&mut self, line_read: String, ctx: &mut <Customer as Actor>::Context) {
         let parsed_line = serde_json::from_str(&line_read);
@@ -342,8 +357,9 @@ impl Customer {
                 SocketMessage::ConnectionAvailable => {
                     ctx.address().do_send(ConnectionAvailable {});
                 }
-                SocketMessage::ConnectionNotAvailable => {
-                    ctx.address().do_send(ConnectionNotAvailable {});
+                SocketMessage::ConnectionNotAvailable(port_to_connect) => {
+                    ctx.address()
+                        .do_send(ConnectionNotAvailable { port_to_connect });
                 }
                 _ => {
                     self.logger

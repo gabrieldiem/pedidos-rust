@@ -40,6 +40,7 @@ impl Handler<Stop> for TcpSender {
     type Result = ();
 
     async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
+        self.write_stream = None;
         _ctx.stop();
     }
 }

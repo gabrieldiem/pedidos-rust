@@ -28,9 +28,9 @@ fn parse_args() -> u32 {
 #[actix_rt::main]
 async fn main() {
     let id = parse_args();
-    match Server::new(id) {
+    match Server::new(id).await {
         Ok(server) => {
-            server.start().await;
+            server.run().await;
         }
         Err(error) => {
             eprintln!("Server failed to start");

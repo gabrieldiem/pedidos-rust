@@ -5,6 +5,18 @@ use serde::{Deserialize, Serialize};
 #[rtype(result = "()")]
 pub struct Stop {}
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct Reconnect {
+    pub current_connected_port: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ConnectTo {
+    pub port: u32,
+}
+
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
 pub struct GetRestaurants {
@@ -129,7 +141,9 @@ pub struct ConnectionAvailable {}
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
-pub struct ConnectionNotAvailable {}
+pub struct ConnectionNotAvailable {
+    pub port_to_connect: u32,
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
@@ -157,5 +171,5 @@ pub enum SocketMessage {
     DeliveryDone,
     IsConnectionReady,
     ConnectionAvailable,
-    ConnectionNotAvailable,
+    ConnectionNotAvailable(u32), // u32 is the port of the available connection
 }
