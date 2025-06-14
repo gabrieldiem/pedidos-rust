@@ -143,7 +143,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[RESTAURANT]"));
     logger.info("Starting...");
 
-    let restaurant = Arc::new(parse_restaurant_from_args()?);
+    let restaurant = Arc::new(match parse_restaurant_from_args() {
+        Ok(r) => r,
+        Err(e) => {
+            logger.error(&format!("Error parsing arguments: {}", e));
+            return Err(e);
+        }
+    });
 
     let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
     let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;

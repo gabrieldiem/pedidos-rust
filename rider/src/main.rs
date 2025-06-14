@@ -271,7 +271,16 @@ async fn main() -> io::Result<()> {
     let logger = Logger::new(Some("[RIDER]"));
     logger.info("Starting...");
 
-    let starting_location = parse_args().expect("Error al parsear los argumentos");
+    let starting_location = match parse_args() {
+        Ok(loc) => loc,
+        Err(e) => {
+            logger.error(&format!("Error al parsear los argumentos: {}", e));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Argumentos inválidos",
+            ));
+        }
+    };
 
     let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
     let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
