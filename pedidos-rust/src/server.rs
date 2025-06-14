@@ -17,6 +17,7 @@ pub struct Server {
     configuration: Configuration,
     hearbeat_monitor: Addr<HeartbeatMonitor>,
     connection_manager: Addr<ConnectionManager>,
+    is_leader: bool,
 }
 
 impl Server {
@@ -29,12 +30,15 @@ impl Server {
         let hearbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
+        let is_leader = id == 1;
+
         Ok(Server {
             id,
             logger,
             configuration,
             hearbeat_monitor,
             connection_manager,
+            is_leader,
         })
     }
 
@@ -66,6 +70,7 @@ impl Server {
 
                 let port = client_sockaddr.port() as u32;
                 ClientConnection {
+                    is_leader: self.is_leader,
                     tcp_sender,
                     logger: Logger::new(Some(&format!("[PEDIDOS-RUST] [CONN:{}]", &port))),
                     id: port,

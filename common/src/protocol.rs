@@ -1,6 +1,10 @@
 use actix::Message;
 use serde::{Deserialize, Serialize};
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct Stop {}
+
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
 pub struct GetRestaurants {
@@ -115,6 +119,18 @@ pub struct FinishDelivery {
     pub reason: String, // Reason for finishing the delivery
 }
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct IsConnectionReady {}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct ConnectionAvailable {}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct ConnectionNotAvailable {}
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
@@ -139,4 +155,7 @@ pub enum SocketMessage {
     RegisterPaymentSystem,
     RiderArrivedAtCustomer,
     DeliveryDone,
+    IsConnectionReady,
+    ConnectionAvailable,
+    ConnectionNotAvailable,
 }

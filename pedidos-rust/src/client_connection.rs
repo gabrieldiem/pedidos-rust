@@ -5,14 +5,14 @@ use crate::messages::{
 };
 use crate::messages::{RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList};
 use actix::{
-    Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
-    WrapFuture,
+    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
+    StreamHandler, WrapFuture,
 };
 use actix_async_handler::async_handler;
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
-    FinishDelivery, Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant,
-    PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage,
+    FinishDelivery, IsConnectionReady, Location, LocationUpdate, Order, OrderInProgress,
+    OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage, Stop,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -20,6 +20,7 @@ use common::utils::logger::Logger;
 use std::io;
 
 pub struct ClientConnection {
+    pub is_leader: bool,
     pub tcp_sender: Addr<TcpSender>,
     pub logger: Logger,
     pub id: u32, // the id is the port
@@ -318,6 +319,44 @@ impl Handler<FinishDelivery> for ClientConnection {
     }
 }
 
+#[async_handler]
+impl Handler<Stop> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug("Stopping connection");
+        _ctx.stop();
+    }
+}
+
+#[async_handler]
+impl Handler<IsConnectionReady> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: IsConnectionReady, _ctx: &mut Self::Context) -> Self::Result {
+        match self.is_leader {
+            true => {
+                self.logger
+                    .debug("Connection is available, entity is leader");
+                if let Err(e) = self.send_message(&SocketMessage::ConnectionAvailable) {
+                    self.logger.error(&e.to_string());
+                    return;
+                }
+            }
+            false => {
+                self.logger
+                    .debug("Connection is not available, entity is not leader");
+                if let Err(e) = self.send_message(&SocketMessage::ConnectionNotAvailable) {
+                    self.logger.error(&e.to_string());
+                    return;
+                }
+
+                _ctx.address().do_send(Stop {});
+            }
+        }
+    }
+}
+
 impl ClientConnection {
     #[allow(unreachable_patterns)]
     fn dispatch_message(
@@ -406,6 +445,9 @@ impl ClientConnection {
                         customer_id,
                         amount,
                     });
+                }
+                SocketMessage::IsConnectionReady => {
+                    ctx.address().do_send(IsConnectionReady {});
                 }
                 _ => {
                     self.logger

@@ -1,19 +1,21 @@
 use common::constants::{MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS};
 use common::utils::logger::Logger;
 
-use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
+use actix::{Actor, ActorContext, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::protocol::{
-    FinishDelivery, GetRestaurants, Location, Order, OrderContent, PushNotification, SocketMessage,
+    ConnectionAvailable, ConnectionNotAvailable, FinishDelivery, GetRestaurants, Location, Order,
+    OrderContent, PushNotification, SocketMessage, Stop,
 };
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use rand::Rng;
 use std::io;
-use tokio::io::{AsyncBufReadExt, BufReader, split};
+use tokio::io::{AsyncBufReadExt, BufReader, Lines, ReadHalf, split};
+use tokio::net::TcpStream;
 use tokio_stream::wrappers::LinesStream;
 
 #[allow(dead_code)]
@@ -22,6 +24,8 @@ pub struct Customer {
     logger: Logger,
     location: Location,
     config: Configuration,
+    my_port: u32,
+    peer_port: u32,
 }
 
 impl Actor for Customer {
@@ -34,10 +38,6 @@ pub struct Start;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct Stop;
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
 pub struct ChooseRestaurant {
     pub restaurants: String,
 }
@@ -47,10 +47,72 @@ impl Handler<Start> for Customer {
     type Result = ();
 
     async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug("Verifying connection is available");
+        if let Err(e) = self.send_message(&SocketMessage::IsConnectionReady) {
+            self.logger.error(&e.to_string());
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<ConnectionAvailable> for Customer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ConnectionAvailable,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger.debug("Connection available");
         _ctx.address().do_send(GetRestaurants {
             customer_location: self.location,
         });
     }
+}
+
+#[async_handler]
+impl Handler<ConnectionNotAvailable> for Customer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ConnectionNotAvailable,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger.debug("Connection unavailable");
+
+        let fut = self.reconnect_tcp();
+        let res = fut.await;
+        match res {
+            Ok((lines_stream, tcp_sender, peer_port)) => {
+                //self.finalize_connection(lines_stream, tcp_sender, peer_port, _ctx);
+                _ctx.address().send(Restart {
+                    lines_stream,
+                    tcp_sender,
+                    peer_port,
+                });
+            }
+            Err(e) => {
+                self.logger
+                    .error(&format!("Error trying to replace TCP connection {e}"));
+            }
+        }
+    }
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct Restart {
+    lines_stream: LinesStream<BufReader<ReadHalf<TcpStream>>>,
+    tcp_sender: Addr<TcpSender>,
+    peer_port: u32,
+}
+
+#[async_handler]
+impl Handler<Restart> for Customer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: Restart, _ctx: &mut Self::Context) -> Self::Result {}
 }
 
 #[async_handler]
@@ -145,7 +207,7 @@ impl Handler<FinishDelivery> for Customer {
     async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.info(_msg.reason.as_str());
 
-        _ctx.address().do_send(Stop);
+        _ctx.address().do_send(Stop {});
         // TODO: que pueda hacer otro pedido, o que al menos mate este proceso
     }
 }
@@ -169,30 +231,96 @@ impl Customer {
                     .collect();
                 let tcp_connector = TcpConnector::new(my_port, dest_ports);
                 let stream = tcp_connector.connect().await?;
+                match stream.peer_addr() {
+                    Ok(peer_addr) => {
+                        let customer = Customer::create(|ctx| {
+                            let (read_half, write_half) = split(stream);
 
-                let customer = Customer::create(|ctx| {
-                    let (read_half, write_half) = split(stream);
+                            Customer::add_stream(
+                                LinesStream::new(BufReader::new(read_half).lines()),
+                                ctx,
+                            );
+                            let tcp_sender = TcpSender {
+                                write_stream: Some(write_half),
+                            }
+                            .start();
 
-                    Customer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
-                    let tcp_sender = TcpSender {
-                        write_stream: Some(write_half),
+                            logger.debug("Created Customer");
+                            let customer_location = Location::new(10, 10);
+                            Customer {
+                                tcp_sender,
+                                logger: Logger::new(Some("[CUSTOMER]")),
+                                location: customer_location,
+                                config,
+                                my_port,
+                                peer_port: peer_addr.port() as u32,
+                            }
+                        });
+                        Ok(customer)
                     }
-                    .start();
-
-                    logger.debug("Created Customer");
-                    let customer_location = Location::new(10, 10);
-                    Customer {
-                        tcp_sender,
-                        logger: Logger::new(Some("[CUSTOMER]")),
-                        location: customer_location,
-                        config,
-                    }
-                });
-
-                Ok(customer)
+                    Err(e) => Err(e.into()),
+                }
             }
             None => Err(format!("Could not find port in configuration for id: {}", id).into()),
         }
+    }
+
+    async fn reconnect_tcp(
+        &mut self,
+    ) -> Result<
+        (
+            LinesStream<BufReader<ReadHalf<TcpStream>>>,
+            Addr<TcpSender>,
+            u32,
+        ),
+        Box<dyn std::error::Error>,
+    > {
+        let dest_ports = self
+            .config
+            .pedidos_rust
+            .ports
+            .iter()
+            .map(|pair| pair.port)
+            .collect();
+
+        self.logger.debug("Stopping TCP Sender");
+        self.tcp_sender
+            .send(Stop {})
+            .await
+            .expect("TCP Sender should have been still alive");
+
+        self.logger.debug("Searching connections");
+        let tcp_connector = TcpConnector::new(self.my_port, dest_ports);
+        let stream = tcp_connector.reset_connection(self.peer_port).await?;
+
+        match stream.peer_addr() {
+            Ok(peer_addr) => {
+                let (read_half, write_half) = split(stream);
+                let lines_stream = LinesStream::new(BufReader::new(read_half).lines());
+                let tcp_sender = TcpSender {
+                    write_stream: Some(write_half),
+                }
+                .start();
+                let peer_port = peer_addr.port() as u32;
+
+                Ok((lines_stream, tcp_sender, peer_port))
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    // The sync part that uses context
+    fn finalize_connection(
+        &mut self,
+        lines_stream: LinesStream<BufReader<ReadHalf<TcpStream>>>,
+        tcp_sender: Addr<TcpSender>,
+        peer_port: u32,
+        ctx: &mut Context<Self>,
+    ) {
+        self.logger.debug("Setting new established connection");
+        Customer::add_stream(lines_stream, ctx);
+        self.tcp_sender = tcp_sender;
+        self.peer_port = peer_port;
     }
 
     #[allow(unreachable_patterns)]
@@ -210,6 +338,12 @@ impl Customer {
                 }
                 SocketMessage::FinishDelivery(reason) => {
                     ctx.address().do_send(FinishDelivery { reason });
+                }
+                SocketMessage::ConnectionAvailable => {
+                    ctx.address().do_send(ConnectionAvailable {});
+                }
+                SocketMessage::ConnectionNotAvailable => {
+                    ctx.address().do_send(ConnectionNotAvailable {});
                 }
                 _ => {
                     self.logger

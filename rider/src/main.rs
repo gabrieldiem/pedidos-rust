@@ -2,7 +2,7 @@ use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, 
 use actix_async_handler::async_handler;
 
 use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT};
-use common::protocol::{DeliveryOffer, Location, LocationUpdate, SocketMessage};
+use common::protocol::{DeliveryOffer, Location, LocationUpdate, SocketMessage, Stop};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
@@ -27,10 +27,6 @@ impl Actor for Rider {
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct Start;
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct Stop;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -135,7 +131,7 @@ impl Handler<DeliverOrderToCustomerHands> for Rider {
         }
 
         self.busy = false;
-        _ctx.address().do_send(Stop);
+        _ctx.address().do_send(Stop {});
     }
 }
 

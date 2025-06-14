@@ -1,5 +1,6 @@
+use crate::protocol::Stop;
 use crate::tcp::tcp_message::TcpMessage;
-use actix::{Actor, Context, Handler};
+use actix::{Actor, ActorContext, Context, Handler};
 use actix_async_handler::async_handler;
 use tokio::io::{AsyncWriteExt, WriteHalf};
 use tokio::net::TcpStream;
@@ -31,5 +32,14 @@ impl Handler<TcpMessage> for TcpSender {
         .await;
 
         self.write_stream = Some(ret_write);
+    }
+}
+
+#[async_handler]
+impl Handler<Stop> for TcpSender {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
+        _ctx.stop();
     }
 }
