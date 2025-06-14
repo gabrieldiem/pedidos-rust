@@ -24,6 +24,7 @@ async fn handle_order(
     logger: Logger,
     client_id: u32,
     price: f64,
+    restaurant_location: Location,
 ) -> Result<(), Box<dyn Error>> {
     logger.info(&format!(
         "Order received from client {} with price {}",
@@ -71,7 +72,7 @@ async fn handle_order(
         "Order from client {} with price {} is ready",
         client_id, price
     ));
-    let response = SocketMessage::OrderReady(client_id);
+    let response = SocketMessage::OrderReady(client_id, restaurant_location);
     let tcp_message = TcpMessage::from_serialized_json(&response)?;
     let mut writer_guard = writer.lock().await;
     writer_guard
@@ -142,7 +143,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let logger = Logger::new(Some("[RESTAURANT]"));
     logger.info("Starting...");
 
-    let restaurant = parse_restaurant_from_args()?;
+    let restaurant = Arc::new(parse_restaurant_from_args()?);
 
     let server_sockeaddr_str = format!("{}:{}", DEFAULT_PR_HOST, DEFAULT_PR_PORT);
     let stream = TcpStream::connect(server_sockeaddr_str.clone()).await?;
@@ -165,9 +166,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             Ok(SocketMessage::PrepareOrder(client_id, price)) => {
                 let writer_clone = Arc::clone(&writer);
                 let logger = Logger::new(Some("[RESTAURANT]"));
+                let restaurant_location = restaurant.location;
                 tokio::spawn(async move {
-                    if let Err(e) =
-                        handle_order(writer_clone, logger.clone(), client_id, price).await
+                    if let Err(e) = handle_order(
+                        writer_clone,
+                        logger.clone(),
+                        client_id,
+                        price,
+                        restaurant_location,
+                    )
+                    .await
                     {
                         logger.error(&format!(
                             "Error preparing order for client {}: {}",

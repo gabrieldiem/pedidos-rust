@@ -4,10 +4,10 @@ use crate::messages::{
     PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant,
     RegisterRider, SendNotification, SendRestaurantList,
 };
-use crate::nearby_entitys::nearby_restaurants;
+use crate::nearby_entitys::{manhattan_distance, nearby_restaurants};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
-use common::constants::NO_RESTAURANTS;
+use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
     FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
@@ -20,6 +20,11 @@ type CustomerId = u32;
 type RiderId = u32;
 type RestaurantId = u32;
 type RestaurantName = String;
+
+pub struct RiderData {
+    pub address: Addr<ClientConnection>,
+    pub location: Option<Location>,
+}
 
 pub struct CustomerData {
     pub address: Addr<ClientConnection>,
@@ -64,7 +69,7 @@ impl RestaurantData {
 
 pub struct ConnectionManager {
     pub logger: Logger,
-    pub riders: HashMap<RiderId, Addr<ClientConnection>>,
+    pub riders: HashMap<RiderId, RiderData>,
     pub customers: HashMap<CustomerId, CustomerData>,
     pub orders_in_process: HashMap<RiderId, CustomerId>,
     pub pending_delivery_requests: VecDeque<FindRider>,
@@ -92,7 +97,7 @@ impl ConnectionManager {
                     .debug("Assigned pending delivery request to newly registered rider");
                 match self.customers.get(&pending_request.customer_id) {
                     Some(customer) => {
-                        rider.do_send(DeliveryOffer {
+                        rider.address.do_send(DeliveryOffer {
                             customer_id: pending_request.customer_id,
                             customer_location: customer.location,
                         });
@@ -121,7 +126,10 @@ impl Handler<RegisterRider> for ConnectionManager {
     async fn handle(&mut self, msg: RegisterRider, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Rider with ID {}", msg.id));
-        self.riders.entry(msg.id).or_insert(msg.address);
+        self.riders.entry(msg.id).or_insert(RiderData {
+            address: msg.address,
+            location: Some(msg.location),
+        });
         self.process_pending_requests();
     }
 }
@@ -356,6 +364,7 @@ impl Handler<OrderReady> for ConnectionManager {
 
             ctx.address().do_send(FindRider {
                 customer_id: msg.customer_id,
+                restaurant_location: msg.restaurant_location,
             });
         } else {
             self.logger
@@ -382,32 +391,52 @@ impl Handler<OrderCancelled> for ConnectionManager {
     }
 }
 
+// any rider will do
+// TODO: bug when connecting multiple riders, given that only one is gotten
 #[async_handler]
 impl Handler<FindRider> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: FindRider, _ctx: &mut Self::Context) -> Self::Result {
-        // any rider will do
-        // TODO: bug when connecting multiple riders, given that only one is gotten
-        match self.riders.values().find(|_rider| true) {
-            Some(found_rider) => match self.customers.get(&msg.customer_id) {
-                Some(customer) => {
-                    found_rider.do_send(DeliveryOffer {
-                        customer_id: msg.customer_id,
-                        customer_location: customer.location,
-                    });
-                }
-                None => {
-                    self.logger
-                        .warn("Failed to find customer data when finding rider");
-                }
-            },
+        let customer_loc = match self.customers.get(&msg.customer_id) {
+            Some(customer) => &customer.location,
             None => {
                 self.logger
-                    .warn("No rider found, adding to pending requests");
-                self.pending_delivery_requests.push_back(msg);
+                    .warn("Customer ID not found when trying to find rider");
+                return;
             }
         };
+
+        let mut nearby_riders: Vec<_> = self
+            .riders
+            .iter()
+            .filter_map(|(_rider_id, rider_data)| {
+                rider_data.location.map(|loc| {
+                    let distance = manhattan_distance(&loc, &msg.restaurant_location);
+                    (distance, rider_data.address.clone())
+                })
+            })
+            .collect();
+
+        nearby_riders.sort_by_key(|(distance, _)| *distance);
+
+        let closest_riders = nearby_riders.into_iter().take(N_RIDERS_TO_NOTIFY);
+
+        let mut sent_to_any = false;
+
+        for (_, rider_address) in closest_riders {
+            rider_address.do_send(DeliveryOffer {
+                customer_id: msg.customer_id,
+                customer_location: *customer_loc,
+            });
+            sent_to_any = true;
+        }
+
+        if !sent_to_any {
+            self.logger
+                .warn("There are no riders with a location registered, adding to pending requests");
+            self.pending_delivery_requests.push_back(msg);
+        }
     }
 }
 

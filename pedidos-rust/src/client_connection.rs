@@ -250,6 +250,7 @@ impl Handler<LocationUpdate> for ClientConnection {
             let msg = RegisterRider {
                 id: self.id,
                 address: _ctx.address(),
+                location: msg.new_location,
             };
             self.connection_manager.do_send(msg);
         }
@@ -368,11 +369,12 @@ impl ClientConnection {
                         customer_id: client_id,
                     });
                 }
-                SocketMessage::OrderReady(client_id) => {
+                SocketMessage::OrderReady(client_id, restaurant_location) => {
                     self.logger
                         .debug(&format!("Order ready for client {}", client_id));
                     self.connection_manager.do_send(OrderReady {
                         customer_id: client_id,
+                        restaurant_location,
                     })
                 }
                 SocketMessage::OrderCalcelled(client_id) => {
