@@ -1,8 +1,8 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    AuthorizePayment, FindRider, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
-    RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
+    AuthorizePayment, FindRider, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest,
+    PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem,
+    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use crate::server_peer::ServerPeer;
@@ -125,13 +125,37 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
 
     async fn handle(&mut self, msg: RegisterPeerServer, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
-            .debug(&format!("Registering Rider with ID {}", msg.id));
+            .debug(&format!("Registering server peer with ID {}", msg.id));
         self.server_peers.entry(msg.id).or_insert(msg.address);
         if msg.is_leader {
             self.leader = Some(msg.id)
         }
         self.process_pending_requests();
         self.logger.info(&format!("{:?}", self.server_peers));
+    }
+}
+
+#[async_handler]
+impl Handler<IsPeerConnected> for ConnectionManager {
+    type Result = Result<bool, ()>;
+
+    async fn handle(&mut self, msg: IsPeerConnected, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger
+            .debug(&format!("Checking if peer with ID {} is connected", msg.id));
+
+        return match self.server_peers.get(&msg.id) {
+            Some(_server_peer) => {
+                self.logger
+                    .debug(&format!("Peer with ID {} is connected", msg.id));
+                Ok(true)
+            }
+            None => {
+                self.logger
+                    .debug(&format!("Peer with ID {} is not connected", msg.id));
+                self.process_pending_requests();
+                Ok(false)
+            }
+        };
     }
 }
 

@@ -172,4 +172,5 @@ pub enum SocketMessage {
     IsConnectionReady,
     ConnectionAvailable,
     ConnectionNotAvailable(u32), // u32 is the port of the available connection
+    ConnectionAvailableForPeer,
 }

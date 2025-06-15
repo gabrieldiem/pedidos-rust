@@ -1,19 +1,26 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct PortIdPair {
+pub struct SinglePedidosRustInfo {
+    pub id: u32,
+    pub port: u32,
+    pub ports_for_peers: Vec<u32>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SingleCustomerInfo {
     pub id: u32,
     pub port: u32,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PedidosRustConfig {
-    pub ports: Vec<PortIdPair>,
+    pub infos: Vec<SinglePedidosRustInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CustomerConfig {
-    pub ports: Vec<PortIdPair>,
+    pub infos: Vec<SingleCustomerInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

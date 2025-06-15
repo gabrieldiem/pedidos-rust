@@ -1,26 +1,46 @@
 {
   "pedidos_rust": {
-    "ports": [
+    "infos": [
       {
         "id": 1,
-        "port": 7501
+        "port": 7501,
+        "ports_for_peers": [
+          8101,
+          8102,
+          8103
+        ]
       },
       {
         "id": 2,
-        "port": 7502
+        "port": 7502,
+        "ports_for_peers": [
+          8201,
+          8202,
+          8203
+        ]
       },
       {
         "id": 3,
-        "port": 7503
+        "port": 7503,
+        "ports_for_peers": [
+          8301,
+          8302,
+          8303
+        ]
       },
       {
         "id": 4,
-        "port": 7504
+        "port": 7504,
+        "ports_for_peers": [
+          8401,
+          8402,
+          8403
+        ]
       }
     ]
   },
   "customer": {
-    "ports": [
+    "infos": [
       {
         "id": 1,
         "port": 7601

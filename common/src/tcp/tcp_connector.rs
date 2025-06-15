@@ -17,7 +17,7 @@ impl Actor for TcpConnector {
 
 /// Iterates through a list of ports until it can connect with 1
 impl TcpConnector {
-    const MAX_WAITING_PERIOD_UDP_IN_SECONDS: u64 = 1;
+    const MAX_WAITING_PERIOD_UDP_IN_MILISECONDS: u64 = 500;
     const MAX_CONNECTION_PASSES: u64 = 3;
 
     pub fn new(source_port: u32, dest_ports: Vec<u32>) -> TcpConnector {
@@ -56,7 +56,7 @@ impl TcpConnector {
         port: u32,
         udp_socket: &UdpSocket,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match Self::try_connection(port, udp_socket, &self.logger.clone(), false).await {
+        match Self::try_connection(port, udp_socket, &self.logger.clone()).await {
             Ok(_port) => {
                 self.logger
                     .debug(&format!("Liveness check for {port} passed"));
@@ -70,10 +70,7 @@ impl TcpConnector {
         }
     }
 
-    pub async fn connect(
-        &self,
-        connect_only_to_leader: bool,
-    ) -> Result<TcpStream, Box<dyn std::error::Error>> {
+    pub async fn connect(&self) -> Result<TcpStream, Box<dyn std::error::Error>> {
         let local_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.source_port as u16);
 
@@ -90,14 +87,7 @@ impl TcpConnector {
                 let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
                 self.logger
                     .debug(&format!("Trying to connect to {}", server_sockaddr));
-                match Self::try_connection(
-                    port,
-                    &socket,
-                    &self.logger.clone(),
-                    connect_only_to_leader,
-                )
-                .await
-                {
+                match Self::try_connection(port, &socket, &self.logger.clone()).await {
                     Ok(port) => {
                         self.logger
                             .debug(&format!("Found port to connect to: {}", port));
@@ -139,7 +129,6 @@ impl TcpConnector {
         port: u32,
         socket: &UdpSocket,
         logger: &Logger,
-        connect_only_to_leader: bool,
     ) -> Result<u32, Box<dyn std::error::Error>> {
         let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
         let msg = Self::serialize_message(SocketMessage::IsConnectionReady)?;
@@ -149,7 +138,7 @@ impl TcpConnector {
 
         let mut buf = [0; 1024];
         let timeout_duration =
-            tokio::time::Duration::from_secs(Self::MAX_WAITING_PERIOD_UDP_IN_SECONDS);
+            tokio::time::Duration::from_millis(Self::MAX_WAITING_PERIOD_UDP_IN_MILISECONDS);
 
         match tokio::time::timeout(timeout_duration, socket.recv_from(&mut buf)).await {
             Ok(Ok((size, _src_address))) => {
@@ -157,14 +146,12 @@ impl TcpConnector {
                 match received_msg {
                     SocketMessage::ConnectionAvailable => Ok(port),
                     SocketMessage::ConnectionNotAvailable(port_to_communicate) => {
-                        if !connect_only_to_leader {
-                            return Ok(port);
-                        }
                         logger.debug(&format!(
                             "Connection not available, but {port_to_communicate} is"
                         ));
                         Ok(port_to_communicate)
                     }
+                    SocketMessage::ConnectionAvailableForPeer => Ok(port),
                     _ => {
                         logger.warn(&format!("Unrecognized message: {:?}", received_msg));
                         Err("Unrecognized message".into())

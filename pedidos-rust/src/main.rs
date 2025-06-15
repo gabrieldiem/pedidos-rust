@@ -35,7 +35,7 @@ async fn main() {
     let logger = Logger::new(Some(&logger_prefix));
 
     match Server::new(id, logger.clone()).await {
-        Ok(server) => {
+        Ok(mut server) => {
             if let Err(e) = server.run().await {
                 logger.error(&format!("Server failed: {e}"));
             }

@@ -10,6 +10,7 @@ use common::constants::DEFAULT_PR_HOST;
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpListener;
@@ -27,6 +28,8 @@ pub struct Server {
     is_leader: bool,
     leader_port: Arc<Mutex<u32>>,
     port: u32,
+    ports_for_peers: Vec<u32>,
+    ports_for_peers_in_use: HashMap<u32, bool>,
 }
 
 impl Server {
@@ -38,12 +41,12 @@ impl Server {
 
         let port_pair = configuration
             .pedidos_rust
-            .ports
+            .infos
             .iter()
             .find(|pair| pair.id == id);
 
-        let my_port: u32 = match port_pair {
-            Some(port_pair) => port_pair.port,
+        let (my_port, ports_for_peers) = match port_pair {
+            Some(port_pair) => (port_pair.port, port_pair.clone().ports_for_peers),
             None => {
                 let msg = format!("Could not find port in configuration for id: {}", id);
                 logger.error(&msg);
@@ -55,7 +58,7 @@ impl Server {
 
         let port_pair = configuration
             .pedidos_rust
-            .ports
+            .infos
             .iter()
             .find(|pair| pair.id == Self::INITIAL_LEADER_ID);
 
@@ -73,6 +76,11 @@ impl Server {
         let hearbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
+        let mut ports_for_peers_in_use: HashMap<u32, bool> = HashMap::new();
+        for port in ports_for_peers.clone() {
+            ports_for_peers_in_use.insert(port, false);
+        }
+
         Ok(Server {
             id,
             logger,
@@ -82,11 +90,34 @@ impl Server {
             is_leader,
             leader_port: Arc::new(Mutex::new(leader_port)),
             port: my_port,
+            ports_for_peers,
+            ports_for_peers_in_use,
         })
     }
 
-    async fn connect_server_peers(&self) -> Result<u64, Box<dyn std::error::Error>> {
-        for port_pair in self.configuration.pedidos_rust.ports.clone() {
+    fn choose_port_for_peer(&mut self) -> Result<u32, Box<dyn std::error::Error>> {
+        for port in self.ports_for_peers.clone() {
+            match self.ports_for_peers_in_use.get(&port) {
+                Some(false) => {
+                    self.ports_for_peers_in_use.insert(port, true);
+                    return Ok(port);
+                }
+                Some(true) => continue,
+                None => {
+                    return Err(format!("No such port in list of ports for peer: {port}").into());
+                }
+            }
+        }
+
+        Err("No ports available for peer connection".into())
+    }
+
+    fn set_peer_port_as_unused(&mut self, port_for_peer: u32) {
+        self.ports_for_peers_in_use.insert(port_for_peer, false);
+    }
+
+    async fn connect_server_peers(&mut self) -> Result<u64, Box<dyn std::error::Error>> {
+        for port_pair in self.configuration.pedidos_rust.infos.clone() {
             let id = port_pair.id;
             let port = port_pair.port;
             if id == self.id {
@@ -94,11 +125,14 @@ impl Server {
             }
             let is_leader = Self::INITIAL_LEADER_ID == id;
 
-            let tcp_connector = TcpConnector::new(self.port, vec![port]);
-            let stream = match tcp_connector.connect(false).await {
+            let port_for_peer = self.choose_port_for_peer()?;
+            let tcp_connector = TcpConnector::new(port_for_peer, vec![port]);
+            let stream = match tcp_connector.connect().await {
                 Ok(stream) => stream,
                 Err(e) => {
-                    self.logger.warn(&format!("Srry bro, fucked up {e}"));
+                    self.logger
+                        .warn(&format!("Failed to establish stream: {e}"));
+                    self.set_peer_port_as_unused(port_for_peer);
                     continue;
                 }
             };
@@ -140,6 +174,8 @@ impl Server {
         let port_clone = self.port;
         let is_leader_clone = self.is_leader;
         let leader_port_clone = self.leader_port.clone();
+        let connection_manager = self.connection_manager.clone();
+        let configuration = self.configuration.clone();
 
         spawn(async move {
             if let Err(e) = ConnectionGateway::run(
@@ -147,6 +183,8 @@ impl Server {
                 logger.clone(),
                 is_leader_clone,
                 leader_port_clone,
+                connection_manager,
+                configuration,
             )
             .await
             {
@@ -157,7 +195,7 @@ impl Server {
         Ok(())
     }
 
-    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
 

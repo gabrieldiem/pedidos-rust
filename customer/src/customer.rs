@@ -158,7 +158,7 @@ impl Customer {
 
         // Setting up ports
         let config = Configuration::new()?;
-        let port_pair = config.customer.ports.iter().find(|pair| pair.id == id);
+        let port_pair = config.customer.infos.iter().find(|pair| pair.id == id);
 
         let port_pair = match port_pair {
             Some(pair) => pair,
@@ -170,14 +170,14 @@ impl Customer {
         let my_port = port_pair.port;
         let dest_ports: Vec<u32> = config
             .pedidos_rust
-            .ports
+            .infos
             .iter()
             .map(|pair| pair.port)
             .collect();
 
         // Setting up connection
         let tcp_connector = TcpConnector::new(my_port, dest_ports.clone());
-        let stream = tcp_connector.connect(true).await?;
+        let stream = tcp_connector.connect().await?;
         let peer_address = stream.peer_addr()?;
         let peer_port = peer_address.port();
 

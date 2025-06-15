@@ -41,6 +41,12 @@ pub struct RegisterPeerServer {
 }
 
 #[derive(Message, Debug)]
+#[rtype(result = "Result<bool, ()>")]
+pub struct IsPeerConnected {
+    pub id: u32,
+}
+
+#[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct PaymentAuthorized {
     pub customer_id: u32,
