@@ -5,6 +5,10 @@ use common::protocol::Location;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct Start {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct RegisterCustomer {
     pub id: u32,
     pub address: Addr<ClientConnection>,

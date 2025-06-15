@@ -2,7 +2,7 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
-use crate::messages::RegisterPeerServer;
+use crate::messages::{RegisterPeerServer, Start};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -228,6 +228,8 @@ impl Server {
         self.connect_server_peers().await?;
 
         self.run_connection_gateway()?;
+
+        self.hearbeat_monitor.do_send(Start {});
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, _peer_id) =
