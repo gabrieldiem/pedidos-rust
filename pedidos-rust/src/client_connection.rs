@@ -10,9 +10,10 @@ use actix::{
 };
 use actix_async_handler::async_handler;
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
-    FinishDelivery, Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant,
-    PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
+    DeliveryOfferConfirmed, ExecutePayment, FinishDelivery, Location, LocationUpdate, Order,
+    OrderInProgress, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
+    SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -286,6 +287,23 @@ impl Handler<DeliveryOfferAccepted> for ClientConnection {
 }
 
 #[async_handler]
+impl Handler<DeliveryOfferConfirmed> for ClientConnection {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: DeliveryOfferConfirmed,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let msg = SocketMessage::DeliveryOfferConfirmed(msg.customer_id, msg.customer_location);
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<RiderArrivedAtCustomer> for ClientConnection {
     type Result = ();
 
@@ -339,16 +357,13 @@ impl ClientConnection {
                         rider_id: self.id,
                     });
                 }
-                SocketMessage::RiderArrivedAtCustomer => {
-                    self.logger.debug("Rider arrived at customer location");
-                    ctx.address()
-                        .do_send(RiderArrivedAtCustomer { rider_id: self.id });
-                }
-                SocketMessage::DeliveryDone => {
+                SocketMessage::DeliveryDone(customer_id) => {
                     self.logger
                         .debug(&format!("Rider {} finished the delivery", self.id));
-                    self.connection_manager
-                        .do_send(DeliveryDone { rider_id: self.id });
+                    self.connection_manager.do_send(DeliveryDone {
+                        rider_id: self.id,
+                        customer_id,
+                    });
                 }
                 SocketMessage::InformLocation(location, name) => {
                     self.logger.debug("A new restaurant wants to register");

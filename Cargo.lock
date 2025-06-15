@@ -473,6 +473,7 @@ dependencies = [
  "actix-rt",
  "actix_async_handler",
  "common",
+ "rand",
  "serde",
  "serde_json",
  "tokio",

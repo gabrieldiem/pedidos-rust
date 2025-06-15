@@ -2,8 +2,10 @@ use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, 
 use actix_async_handler::async_handler;
 use std::error::Error;
 
-use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT};
-use common::protocol::{DeliveryOffer, Location, LocationUpdate, SocketMessage};
+use common::constants::{DEFAULT_PR_HOST, DEFAULT_PR_PORT, DELIVERY_ACCEPT_PROBABILITY};
+use common::protocol::{
+    DeliveryOffer, DeliveryOfferConfirmed, Location, LocationUpdate, SocketMessage,
+};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
@@ -19,6 +21,7 @@ struct Rider {
     location: Location,
     customer_location: Option<Location>,
     busy: bool,
+    customer_id: Option<u32>,
 }
 
 impl Actor for Rider {
@@ -36,10 +39,6 @@ pub struct Stop;
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct GoToCustomerLocation;
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct DeliverOrderToCustomerHands;
 
 #[async_handler]
 impl Handler<Start> for Rider {
@@ -106,37 +105,17 @@ impl Handler<GoToCustomerLocation> for Rider {
                 customer_location.x, customer_location.y
             ));
 
-            if let Err(e) = self.send_message(&SocketMessage::RiderArrivedAtCustomer) {
+            self.logger.info("Delivery done!");
+            self.busy = false;
+            self.customer_location = None;
+
+            if let Err(e) =
+                self.send_message(&SocketMessage::DeliveryDone(self.customer_id.unwrap()))
+            {
                 self.logger.error(&e.to_string());
                 return;
             }
-
-            _ctx.address().do_send(DeliverOrderToCustomerHands);
         }
-    }
-}
-
-#[async_handler]
-impl Handler<DeliverOrderToCustomerHands> for Rider {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        _msg: DeliverOrderToCustomerHands,
-        _ctx: &mut Self::Context,
-    ) -> Self::Result {
-        self.logger.info("Delivering order to customer hands...");
-        sleep(Duration::from_millis(4000)).await;
-
-        self.logger.info("Delivery done!");
-
-        if let Err(e) = self.send_message(&SocketMessage::DeliveryDone) {
-            self.logger.error(&e.to_string());
-            return;
-        }
-
-        self.busy = false;
-        _ctx.address().do_send(Stop);
     }
 }
 
@@ -146,7 +125,10 @@ impl Handler<DeliveryOffer> for Rider {
 
     async fn handle(&mut self, msg: DeliveryOffer, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Got DeliveryOffer");
-        let will_accept = true; // TODO: can be changed to random afterward
+        let will_accept = rand::random::<f32>() < DELIVERY_ACCEPT_PROBABILITY;
+
+        let sleep_millis = rand::random::<u64>() % 2000 + 1000;
+        sleep(Duration::from_millis(sleep_millis)).await;
 
         if will_accept && !self.busy {
             self.logger.debug(&format!(
@@ -154,19 +136,47 @@ impl Handler<DeliveryOffer> for Rider {
                 msg.customer_id
             ));
 
-            self.customer_location = Some(msg.customer_location);
-            self.busy = true;
-
             let msg = SocketMessage::DeliveryOfferAccepted(msg.customer_id);
             if let Err(e) = self.send_message(&msg) {
                 self.logger.error(&e.to_string());
                 return;
             }
-
-            // TODO: needs logic to handle when multiple riders accept the offer
-            // TODO: needs to handle rejection
-            _ctx.address().do_send(GoToCustomerLocation);
+        } else {
+            self.logger.debug(&format!(
+                "Delivery offer for customer {} denied",
+                msg.customer_id
+            ));
+            // Hace falta hacer algo si se niega la oferta?
+            //let msg = SocketMessage::DeliveryOfferDenied(self.customer_id.unwrap());
+            //if let Err(e) = self.send_message(&msg) {
+            //    self.logger.error(&e.to_string());
+            //    return;
+            //}
         }
+    }
+}
+
+#[async_handler]
+impl Handler<DeliveryOfferConfirmed> for Rider {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: DeliveryOfferConfirmed,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger.debug(&format!(
+            "Delivery offer confirmed for customer {}",
+            msg.customer_id
+        ));
+
+        self.customer_location = Some(msg.customer_location);
+        self.busy = true;
+        self.customer_id = Some(msg.customer_id);
+
+        // TODO: needs logic to handle when multiple riders accept the offer
+        // TODO: needs to handle rejection
+        _ctx.address().do_send(GoToCustomerLocation);
     }
 }
 
@@ -201,6 +211,13 @@ impl Rider {
             Ok(message) => match message {
                 SocketMessage::DeliveryOffer(customer_id, customer_location) => {
                     ctx.address().do_send(DeliveryOffer {
+                        customer_id,
+                        customer_location,
+                    });
+                }
+                SocketMessage::DeliveryOfferConfirmed(customer_id, customer_location) => {
+                    // HACER LO QUE AHORA HACE DELIVERY OFFER
+                    ctx.address().do_send(DeliveryOfferConfirmed {
                         customer_id,
                         customer_location,
                     });
@@ -304,6 +321,7 @@ async fn main() -> io::Result<()> {
             location: starting_location,
             customer_location: None,
             busy: false,
+            customer_id: None,
         }
     });
 
