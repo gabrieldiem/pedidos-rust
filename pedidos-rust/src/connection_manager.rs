@@ -10,8 +10,8 @@ use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, Wrap
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
-    FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ElectionCall,
+    ExecutePayment, FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
     RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
@@ -65,19 +65,26 @@ impl RestaurantData {
 
 pub struct ConnectionManager {
     pub logger: Logger,
+    pub id: u32,
+
+    // Entities
     pub riders: HashMap<RiderId, Addr<ClientConnection>>,
     pub customers: HashMap<CustomerId, CustomerData>,
-    pub orders_in_process: HashMap<RiderId, CustomerId>,
-    pub pending_delivery_requests: VecDeque<FindRider>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
+
+    pub orders_in_process: HashMap<RiderId, CustomerId>,
+    pub pending_delivery_requests: VecDeque<FindRider>,
+
+    // Peers
     pub server_peers: HashMap<u32, Addr<ServerPeer>>,
     pub leader: Option<u32>,
 }
 
 impl ConnectionManager {
-    pub fn new() -> ConnectionManager {
+    pub fn new(id: u32) -> ConnectionManager {
         ConnectionManager {
+            id,
             logger: Logger::new(Some("[CONNECTION-MANAGER]")),
             riders: HashMap::new(),
             customers: HashMap::new(),
@@ -120,6 +127,24 @@ impl Actor for ConnectionManager {
 }
 
 #[async_handler]
+impl Handler<ElectionCall> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: ElectionCall, _ctx: &mut Self::Context) -> Self::Result {
+        for peer_id in self.server_peers.keys() {
+            if *peer_id > self.id {
+                match self.server_peers.get(peer_id) {
+                    Some(peer_addr) => peer_addr.do_send(ElectionCall {}),
+                    None => {
+                        self.logger.warn("No peer found");
+                    }
+                };
+            }
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<RegisterPeerServer> for ConnectionManager {
     type Result = ();
 
@@ -127,9 +152,6 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
         self.logger
             .debug(&format!("Registering server peer with ID {}", msg.id));
         self.server_peers.entry(msg.id).or_insert(msg.address);
-        if msg.is_leader {
-            self.leader = Some(msg.id)
-        }
         self.process_pending_requests();
         self.logger.info(&format!("{:?}", self.server_peers));
     }

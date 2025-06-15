@@ -20,7 +20,6 @@ use common::utils::logger::Logger;
 use std::io;
 
 pub struct ClientConnection {
-    pub is_leader: bool,
     pub tcp_sender: Addr<TcpSender>,
     pub logger: Logger,
     pub id: u32, // the id is the port

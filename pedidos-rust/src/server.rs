@@ -12,11 +12,9 @@ use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::spawn;
-use tokio::sync::Mutex;
 use tokio_stream::wrappers::LinesStream;
 
 #[allow(dead_code)]
@@ -26,18 +24,14 @@ pub struct Server {
     configuration: Configuration,
     hearbeat_monitor: Addr<HeartbeatMonitor>,
     connection_manager: Addr<ConnectionManager>,
-    is_leader: bool,
-    leader_port: Arc<Mutex<u32>>,
     port: u32,
     ports_for_peers: Vec<u32>,
     ports_for_peers_in_use: HashMap<u32, bool>,
 }
 
 impl Server {
-    const INITIAL_LEADER_ID: u32 = 1;
-
     pub async fn new(id: u32, logger: Logger) -> Result<Server, Box<dyn std::error::Error>> {
-        let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new());
+        let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new(id));
         let configuration = Configuration::new()?;
 
         let port_pair = configuration
@@ -55,25 +49,6 @@ impl Server {
             }
         };
 
-        let is_leader = id == Self::INITIAL_LEADER_ID;
-
-        let port_pair = configuration
-            .pedidos_rust
-            .infos
-            .iter()
-            .find(|pair| pair.id == Self::INITIAL_LEADER_ID);
-
-        let leader_port: u32 = match port_pair {
-            Some(port_pair) => port_pair.port,
-            None => {
-                let msg = format!(
-                    "Could not find port in configuration for id: {}",
-                    Self::INITIAL_LEADER_ID
-                );
-                logger.error(&msg);
-                return Err(msg.into());
-            }
-        };
         let hearbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
@@ -88,8 +63,6 @@ impl Server {
             configuration,
             hearbeat_monitor,
             connection_manager,
-            is_leader,
-            leader_port: Arc::new(Mutex::new(leader_port)),
             port: my_port,
             ports_for_peers,
             ports_for_peers_in_use,
@@ -124,7 +97,6 @@ impl Server {
             if id == self.id {
                 continue;
             }
-            let is_leader = Self::INITIAL_LEADER_ID == id;
 
             let port_for_peer = self.choose_port_for_peer()?;
             let tcp_connector = TcpConnector::new(port_for_peer, vec![port]);
@@ -161,11 +133,8 @@ impl Server {
                 }
             });
 
-            self.connection_manager.do_send(RegisterPeerServer {
-                id,
-                address: peer,
-                is_leader,
-            });
+            self.connection_manager
+                .do_send(RegisterPeerServer { id, address: peer });
         }
         Ok(1)
     }
@@ -173,8 +142,6 @@ impl Server {
     fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {
         let logger = Logger::new(Some("[CONN-GATEWAY]"));
         let port_clone = self.port;
-        let is_leader_clone = self.is_leader;
-        let leader_port_clone = self.leader_port.clone();
         let connection_manager = self.connection_manager.clone();
         let configuration = self.configuration.clone();
 
@@ -182,8 +149,6 @@ impl Server {
             if let Err(e) = ConnectionGateway::run(
                 port_clone,
                 logger.clone(),
-                is_leader_clone,
-                leader_port_clone,
                 connection_manager,
                 configuration,
             )
@@ -238,7 +203,6 @@ impl Server {
 
             let port = client_sockaddr.port() as u32;
             ClientConnection {
-                is_leader: self.is_leader,
                 tcp_sender,
                 logger: Logger::new(Some(&format!("[PEDIDOS-RUST] [CONN:{}]", &port))),
                 id: port,

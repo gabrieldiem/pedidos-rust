@@ -37,7 +37,6 @@ pub struct RegisterPaymentSystem {
 pub struct RegisterPeerServer {
     pub id: u32,
     pub address: Addr<ServerPeer>,
-    pub is_leader: bool,
 }
 
 #[derive(Message, Debug)]

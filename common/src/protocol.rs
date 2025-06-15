@@ -145,6 +145,20 @@ pub struct ConnectionNotAvailable {
     pub port_to_connect: u32,
 }
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionCall {}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionOk {}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionCoordinator {}
+
+pub const UNKNOWN_LEADER: u32 = 0;
+
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
@@ -171,6 +185,9 @@ pub enum SocketMessage {
     DeliveryDone,
     IsConnectionReady,
     ConnectionAvailable,
-    ConnectionNotAvailable(u32), // u32 is the port of the available connection
+    ConnectionNotAvailable(u32), // u32 is the port of the available connection, can be UNKNOWN_LEADER
     ConnectionAvailableForPeer,
+    ElectionCall,
+    ElectionOk,
+    ElectionCoordinator,
 }

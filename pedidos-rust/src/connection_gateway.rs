@@ -2,12 +2,10 @@ use crate::connection_manager::ConnectionManager;
 use crate::messages::IsPeerConnected;
 use actix::Addr;
 use common::configuration::Configuration;
-use common::protocol::SocketMessage;
+use common::protocol::{SocketMessage, UNKNOWN_LEADER};
 use common::utils::logger::Logger;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
 use tokio::net::UdpSocket;
-use tokio::sync::Mutex;
 
 pub struct ConnectionGateway {}
 
@@ -70,16 +68,21 @@ impl ConnectionGateway {
         Ok(msg)
     }
 
+    async fn get_leader_information(
+        connection_manager: &Addr<ConnectionManager>,
+    ) -> Result<(u32, bool), Box<dyn std::error::Error>> {
+        Ok((UNKNOWN_LEADER, false))
+    }
+
     async fn send_connection_answer(
         logger: &Logger,
         socket: &UdpSocket,
         addr: SocketAddr,
-        is_current_server_leader: bool,
-        leader_port: Arc<Mutex<u32>>,
         connection_manager: Addr<ConnectionManager>,
         configuration: &Configuration,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let leader_port = *leader_port.lock().await;
+        let (leader_port, is_current_server_leader) =
+            Self::get_leader_information(&connection_manager).await?;
         let (is_connection_a_peer, peer_id) = Self::is_connection_a_peer(&addr, configuration);
         let msg: String = if is_connection_a_peer {
             Self::handle_incomming_peer_request(connection_manager, peer_id, leader_port, logger)
@@ -88,8 +91,13 @@ impl ConnectionGateway {
             logger.debug("Instance is leader. Connection available");
             Self::serialize_message(SocketMessage::ConnectionAvailable)?
         } else {
+            let leader_string = if leader_port == UNKNOWN_LEADER {
+                "unknown"
+            } else {
+                &leader_port.to_string()
+            };
             logger.debug(&format!(
-                "Instance is not leader. Connection refused. Leader is: {leader_port}"
+                "Instance is not leader. Connection refused. Leader is: {leader_string}"
             ));
             Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
         };
@@ -100,8 +108,6 @@ impl ConnectionGateway {
     pub async fn run(
         port: u32,
         logger: Logger,
-        is_leader: bool,
-        leader_port: Arc<Mutex<u32>>,
         connection_manager: Addr<ConnectionManager>,
         configuration: Configuration,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -133,8 +139,6 @@ impl ConnectionGateway {
                                 &logger,
                                 &socket,
                                 addr,
-                                is_leader,
-                                leader_port.clone(),
                                 connection_manager.clone(),
                                 &configuration,
                             )

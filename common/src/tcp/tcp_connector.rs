@@ -1,5 +1,5 @@
 use crate::constants::DEFAULT_PR_HOST;
-use crate::protocol::SocketMessage;
+use crate::protocol::{SocketMessage, UNKNOWN_LEADER};
 use crate::utils::logger::Logger;
 use actix::{Actor, Context};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -89,6 +89,12 @@ impl TcpConnector {
                     .debug(&format!("Trying to connect to {}", server_sockaddr));
                 match Self::try_connection(port, &socket, &self.logger.clone()).await {
                     Ok(port) => {
+                        if port == UNKNOWN_LEADER {
+                            self.logger
+                                .debug("Port referal failed, it does not know the leader");
+                            continue;
+                        }
+
                         self.logger
                             .debug(&format!("Found port to connect to: {}", port));
 
