@@ -11,9 +11,10 @@ use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use tokio::spawn;
 use tokio::sync::Mutex;
 use tokio_stream::wrappers::LinesStream;
@@ -195,6 +196,58 @@ impl Server {
         Ok(())
     }
 
+    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream) {
+        self.logger
+            .info(&format!("Peer connected: {peer_sockaddr}"));
+        let port = peer_sockaddr.port() as u32;
+
+        ServerPeer::create(|ctx| {
+            let (read_half, write_half) = split(stream);
+
+            ServerPeer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
+
+            let tcp_sender = TcpSender {
+                write_stream: Some(write_half),
+            }
+            .start();
+
+            self.logger.debug("Created ServerPeer");
+
+            ServerPeer {
+                tcp_sender,
+                logger: Logger::new(Some(&format!("[PEER-{port}]"))),
+                port,
+                connection_manager: self.connection_manager.clone(),
+            }
+        });
+    }
+
+    fn create_client_connection(&self, client_sockaddr: SocketAddr, stream: TcpStream) {
+        self.logger
+            .info(&format!("Client connected: {client_sockaddr}"));
+
+        ClientConnection::create(|ctx| {
+            self.logger.debug("Created ClientConnection");
+            let (read_half, write_half) = split(stream);
+
+            ClientConnection::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
+            let tcp_sender = TcpSender {
+                write_stream: Some(write_half),
+            }
+            .start();
+
+            let port = client_sockaddr.port() as u32;
+            ClientConnection {
+                is_leader: self.is_leader,
+                tcp_sender,
+                logger: Logger::new(Some(&format!("[PEDIDOS-RUST] [CONN:{}]", &port))),
+                id: port,
+                connection_manager: self.connection_manager.clone(),
+                peer_location: None,
+            }
+        });
+    }
+
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
@@ -208,33 +261,15 @@ impl Server {
 
         self.run_connection_gateway()?;
 
-        while let Ok((stream, client_sockaddr)) = listener.accept().await {
-            self.logger
-                .info(&format!("Client connected: {client_sockaddr}"));
+        while let Ok((stream, connected_sockaddr)) = listener.accept().await {
+            let (is_peer, _peer_id) =
+                ConnectionGateway::is_connection_a_peer(&connected_sockaddr, &self.configuration);
 
-            ClientConnection::create(|ctx| {
-                self.logger.debug("Created ClientConnection");
-                let (read_half, write_half) = split(stream);
-
-                ClientConnection::add_stream(
-                    LinesStream::new(BufReader::new(read_half).lines()),
-                    ctx,
-                );
-                let tcp_sender = TcpSender {
-                    write_stream: Some(write_half),
-                }
-                .start();
-
-                let port = client_sockaddr.port() as u32;
-                ClientConnection {
-                    is_leader: self.is_leader,
-                    tcp_sender,
-                    logger: Logger::new(Some(&format!("[PEDIDOS-RUST] [CONN:{}]", &port))),
-                    id: port,
-                    connection_manager: self.connection_manager.clone(),
-                    peer_location: None,
-                }
-            });
+            if is_peer {
+                self.create_server_peer(connected_sockaddr, stream);
+            } else {
+                self.create_client_connection(connected_sockaddr, stream);
+            }
         }
 
         Ok(())

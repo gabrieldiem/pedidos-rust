@@ -28,7 +28,7 @@ impl ConnectionGateway {
         Ok(msg_to_send)
     }
 
-    fn is_connection_a_peer(addr: &SocketAddr, configuration: &Configuration) -> (bool, u32) {
+    pub fn is_connection_a_peer(addr: &SocketAddr, configuration: &Configuration) -> (bool, u32) {
         let port_used = addr.port() as u32;
 
         for port_pair in configuration.pedidos_rust.infos.clone() {
@@ -40,6 +40,34 @@ impl ConnectionGateway {
         }
 
         (false, Self::NOT_A_PEER_PORT)
+    }
+
+    async fn handle_incomming_peer_request(
+        connection_manager: Addr<ConnectionManager>,
+        peer_id: u32,
+        leader_port: u32,
+        logger: &Logger,
+    ) -> Result<String, Box<dyn std::error::Error>> {
+        let msg = if let Ok(is_peer_connected) = connection_manager
+            .send(IsPeerConnected { id: peer_id })
+            .await?
+        {
+            if is_peer_connected {
+                logger.debug(&format!(
+                    "Peer with ID {peer_id} already connected, refusing connection"
+                ));
+                Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
+            } else {
+                logger.debug(&format!(
+                    "Peer with ID {peer_id} not connected, accepting connection"
+                ));
+                Self::serialize_message(SocketMessage::ConnectionAvailableForPeer)?
+            }
+        } else {
+            Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
+        };
+
+        Ok(msg)
     }
 
     async fn send_connection_answer(
@@ -54,24 +82,8 @@ impl ConnectionGateway {
         let leader_port = *leader_port.lock().await;
         let (is_connection_a_peer, peer_id) = Self::is_connection_a_peer(&addr, configuration);
         let msg: String = if is_connection_a_peer {
-            if let Ok(is_peer_connected) = connection_manager
-                .send(IsPeerConnected { id: peer_id })
+            Self::handle_incomming_peer_request(connection_manager, peer_id, leader_port, logger)
                 .await?
-            {
-                if is_peer_connected {
-                    logger.debug(&format!(
-                        "Peer with ID {peer_id} already connected, refusing connection"
-                    ));
-                    Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
-                } else {
-                    logger.debug(&format!(
-                        "Peer with ID {peer_id} not connected, accepting connection"
-                    ));
-                    Self::serialize_message(SocketMessage::ConnectionAvailableForPeer)?
-                }
-            } else {
-                Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
-            }
         } else if is_current_server_leader {
             logger.debug("Instance is leader. Connection available");
             Self::serialize_message(SocketMessage::ConnectionAvailable)?
