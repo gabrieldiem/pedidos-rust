@@ -1,7 +1,9 @@
 use crate::connection_manager::LeaderData;
+use crate::connection_manager::PeerId;
 use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
 use common::protocol::Location;
+use std::collections::HashMap;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -133,3 +135,7 @@ pub struct ElectionCoordinatorReceived {
 #[derive(Message, Debug)]
 #[rtype(result = "Result<Option<LeaderData>, ()>")]
 pub struct GetLeaderInfo {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "Result<HashMap<PeerId, Addr<ServerPeer>>, ()>")]
+pub struct GetPeers {}

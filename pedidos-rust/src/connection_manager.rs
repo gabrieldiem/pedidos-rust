@@ -1,9 +1,9 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, IsPeerConnected,
-    OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied, PaymentExecuted,
-    RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider,
-    SendNotification, SendRestaurantList,
+    AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
+    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
+    PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
+    RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use crate::server_peer::ServerPeer;
@@ -73,6 +73,8 @@ impl RestaurantData {
     }
 }
 
+pub type PeerId = u32;
+
 pub struct ConnectionManager {
     pub logger: Logger,
     pub id: u32,
@@ -89,7 +91,7 @@ pub struct ConnectionManager {
     pub pending_delivery_requests: VecDeque<FindRider>,
 
     // Peers
-    pub server_peers: HashMap<u32, Addr<ServerPeer>>,
+    pub server_peers: HashMap<PeerId, Addr<ServerPeer>>,
     pub leader: Option<LeaderData>,
     pub election_in_progress: bool,
 }
@@ -140,6 +142,15 @@ impl ConnectionManager {
 
 impl Actor for ConnectionManager {
     type Context = Context<Self>;
+}
+
+#[async_handler]
+impl Handler<GetPeers> for ConnectionManager {
+    type Result = Result<HashMap<PeerId, Addr<ServerPeer>>, ()>;
+
+    async fn handle(&mut self, _msg: GetPeers, _ctx: &mut Self::Context) -> Self::Result {
+        Ok(self.server_peers.clone())
+    }
 }
 
 #[async_handler]

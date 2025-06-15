@@ -1,5 +1,5 @@
 use crate::connection_manager::ConnectionManager;
-use crate::messages::Start;
+use crate::messages::{GetPeers, Start};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, Message};
 use actix_async_handler::async_handler;
 use common::utils::logger::Logger;
@@ -51,6 +51,15 @@ impl Handler<CheckLiveness> for HeartbeatMonitor {
 
     async fn handle(&mut self, _msg: CheckLiveness, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!("Beat {}", self.beat_count));
+
+        let fut = self.connection_manager.send(GetPeers {});
+        let res_fut = fut.await;
+
+        if let Ok(res_peers) = res_fut {
+            if let Ok(peers) = res_peers {
+                self.logger.debug(&format!("Peers: {:#?}", peers.len()));
+            }
+        }
 
         self.beat_count += 1;
         _ctx.notify_later(

@@ -165,12 +165,12 @@ impl Server {
         Ok(())
     }
 
-    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream) {
+    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream, peer_id: u32) {
         self.logger
             .info(&format!("Peer connected: {peer_sockaddr}"));
         let port = peer_sockaddr.port() as u32;
 
-        ServerPeer::create(|ctx| {
+        let server_peer = ServerPeer::create(|ctx| {
             let (read_half, write_half) = split(stream);
 
             ServerPeer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
@@ -188,6 +188,11 @@ impl Server {
                 port,
                 connection_manager: self.connection_manager.clone(),
             }
+        });
+
+        self.connection_manager.do_send(RegisterPeerServer {
+            id: peer_id,
+            address: server_peer,
         });
     }
 
@@ -232,11 +237,11 @@ impl Server {
         self.hearbeat_monitor.do_send(Start {});
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
-            let (is_peer, _peer_id) =
+            let (is_peer, peer_id) =
                 ConnectionGateway::is_connection_a_peer(&connected_sockaddr, &self.configuration);
 
             if is_peer {
-                self.create_server_peer(connected_sockaddr, stream);
+                self.create_server_peer(connected_sockaddr, stream, peer_id);
             } else {
                 self.create_client_connection(connected_sockaddr, stream);
             }
