@@ -1,18 +1,20 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    AuthorizePayment, FindRider, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest,
-    PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem,
-    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
+    AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, IsPeerConnected,
+    OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied, PaymentExecuted,
+    RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider,
+    SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
+use common::configuration::Configuration;
 use common::constants::NO_RESTAURANTS;
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ElectionCall,
-    ExecutePayment, FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
-    RiderArrivedAtCustomer,
+    ElectionCoordinator, ExecutePayment, FinishDelivery, Location, OrderToRestaurant,
+    PushNotification, Restaurants, RiderArrivedAtCustomer,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -22,6 +24,13 @@ type RiderId = u32;
 type RestaurantId = u32;
 type RestaurantName = String;
 
+#[derive(Debug, Clone)]
+pub struct LeaderData {
+    pub id: u32,
+    pub port: u32,
+}
+
+#[derive(Debug, Clone)]
 pub struct CustomerData {
     pub address: Addr<ClientConnection>,
     pub location: Location,
@@ -43,6 +52,7 @@ impl CustomerData {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct RestaurantData {
     pub address: Addr<ClientConnection>,
     pub id: RestaurantId,
@@ -66,6 +76,8 @@ impl RestaurantData {
 pub struct ConnectionManager {
     pub logger: Logger,
     pub id: u32,
+    pub port: u32,
+    pub configuration: Configuration,
 
     // Entities
     pub riders: HashMap<RiderId, Addr<ClientConnection>>,
@@ -78,13 +90,16 @@ pub struct ConnectionManager {
 
     // Peers
     pub server_peers: HashMap<u32, Addr<ServerPeer>>,
-    pub leader: Option<u32>,
+    pub leader: Option<LeaderData>,
+    pub election_in_progress: bool,
 }
 
 impl ConnectionManager {
-    pub fn new(id: u32) -> ConnectionManager {
+    pub fn new(id: u32, port: u32, configuration: Configuration) -> ConnectionManager {
         ConnectionManager {
             id,
+            port,
+            configuration,
             logger: Logger::new(Some("[CONNECTION-MANAGER]")),
             riders: HashMap::new(),
             customers: HashMap::new(),
@@ -94,6 +109,7 @@ impl ConnectionManager {
             payment_system: None,
             server_peers: HashMap::new(),
             leader: None,
+            election_in_progress: false,
         }
     }
 
@@ -127,20 +143,94 @@ impl Actor for ConnectionManager {
 }
 
 #[async_handler]
+impl Handler<ElectionCoordinatorReceived> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: ElectionCoordinatorReceived,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.election_in_progress = false;
+        let leader_port = msg.leader_port;
+
+        let info = self
+            .configuration
+            .pedidos_rust
+            .infos
+            .iter()
+            .find(|pair| pair.port == leader_port);
+
+        match info {
+            Some(info) => {
+                self.leader = Some(LeaderData {
+                    id: info.id,
+                    port: leader_port,
+                });
+                self.logger.debug(&format!(
+                    "Election coordinator received. New leader is {} with ID {}",
+                    leader_port, info.id
+                ));
+            }
+            None => self
+                .logger
+                .debug(&format!("No info for port {leader_port}")),
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<ElectionCall> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, _msg: ElectionCall, _ctx: &mut Self::Context) -> Self::Result {
+        if self.election_in_progress {
+            return;
+        }
+
+        // Send to all peers with higher ID an ElectionCall message
         for peer_id in self.server_peers.keys() {
             if *peer_id > self.id {
                 match self.server_peers.get(peer_id) {
-                    Some(peer_addr) => peer_addr.do_send(ElectionCall {}),
+                    Some(peer_addr) => {
+                        peer_addr.do_send(ElectionCall {});
+                        self.election_in_progress = true;
+                    }
                     None => {
                         self.logger.warn("No peer found");
                     }
                 };
             }
         }
+
+        // If no message was sent, then I am the highest currently
+        // So I am the leader
+        if !self.election_in_progress {
+            self.leader = Some(LeaderData {
+                id: self.id,
+                port: self.port,
+            });
+
+            for peer_id in self.server_peers.keys() {
+                match self.server_peers.get(peer_id) {
+                    Some(peer_addr) => {
+                        peer_addr.do_send(ElectionCoordinator {});
+                    }
+                    None => {
+                        self.logger.warn("No peer found");
+                    }
+                };
+            }
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<GetLeaderInfo> for ConnectionManager {
+    type Result = Result<Option<LeaderData>, ()>;
+
+    async fn handle(&mut self, _msg: GetLeaderInfo, _ctx: &mut Self::Context) -> Self::Result {
+        Ok(self.leader.clone())
     }
 }
 
@@ -153,7 +243,6 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
             .debug(&format!("Registering server peer with ID {}", msg.id));
         self.server_peers.entry(msg.id).or_insert(msg.address);
         self.process_pending_requests();
-        self.logger.info(&format!("{:?}", self.server_peers));
     }
 }
 

@@ -1,4 +1,5 @@
 use crate::connection_manager::ConnectionManager;
+use crate::messages::{ElectionCallReceived, ElectionCoordinatorReceived};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{ElectionCall, ElectionCoordinator, ElectionOk, SocketMessage};
@@ -12,6 +13,28 @@ pub struct ServerPeer {
     pub logger: Logger,
     pub port: u32,
     pub connection_manager: Addr<ConnectionManager>,
+}
+
+#[async_handler]
+impl Handler<ElectionCallReceived> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: ElectionCallReceived,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.connection_manager.do_send(ElectionCall {});
+
+        let msg_to_send = SocketMessage::ElectionOk;
+        self.logger
+            .debug(&format!("Sending ElectionOk to {}", self.port));
+
+        if let Err(e) = self.send_message(&msg_to_send) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
 }
 
 #[async_handler]
@@ -34,14 +57,47 @@ impl Handler<ElectionCall> for ServerPeer {
 impl Handler<ElectionOk> for ServerPeer {
     type Result = ();
 
-    async fn handle(&mut self, msg: ElectionOk, _ctx: &mut Self::Context) -> Self::Result {}
+    async fn handle(&mut self, _msg: ElectionOk, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug(&format!(
+            "Received ElectionOk from {}. Waiting for coordinator message",
+            self.port
+        ));
+    }
+}
+
+#[async_handler]
+impl Handler<ElectionCoordinatorReceived> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: ElectionCoordinatorReceived,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.connection_manager
+            .do_send(ElectionCoordinatorReceived {
+                leader_port: msg.leader_port,
+            });
+    }
 }
 
 #[async_handler]
 impl Handler<ElectionCoordinator> for ServerPeer {
     type Result = ();
 
-    async fn handle(&mut self, msg: ElectionCoordinator, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(
+        &mut self,
+        _msg: ElectionCoordinator,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let msg_to_send = SocketMessage::ElectionCoordinator;
+        self.logger
+            .debug(&format!("Sending ElectionCoordinator to {}", self.port));
+
+        if let Err(e) = self.send_message(&msg_to_send) {
+            self.logger.error(&e.to_string());
+            return;
+        }
     }
 }
 
@@ -51,12 +107,16 @@ impl ServerPeer {
         let parsed_line = serde_json::from_str(&line_read);
         match parsed_line {
             Ok(message) => match message {
-                SocketMessage::ElectionCall => self.connection_manager.do_send(ElectionCall {}),
+                SocketMessage::ElectionCall => {
+                    ctx.address().do_send(ElectionCallReceived {});
+                }
                 SocketMessage::ElectionOk => {
                     ctx.address().do_send(ElectionOk {});
                 }
                 SocketMessage::ElectionCoordinator => {
-                    ctx.address().do_send(ElectionCoordinator {});
+                    ctx.address().do_send(ElectionCoordinatorReceived {
+                        leader_port: self.port,
+                    });
                 }
                 _ => {
                     self.logger

@@ -1,3 +1,4 @@
+use crate::connection_manager::LeaderData;
 use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
 use common::protocol::Location;
@@ -114,3 +115,17 @@ pub struct SendNotification {
     pub message: String,
     pub recipient_id: u32, // ID of the recipient aka receiver of the notification
 }
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionCallReceived {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionCoordinatorReceived {
+    pub leader_port: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "Result<Option<LeaderData>, ()>")]
+pub struct GetLeaderInfo {}

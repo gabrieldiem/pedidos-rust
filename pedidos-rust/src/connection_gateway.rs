@@ -1,5 +1,5 @@
-use crate::connection_manager::ConnectionManager;
-use crate::messages::IsPeerConnected;
+use crate::connection_manager::{ConnectionManager, LeaderData};
+use crate::messages::{GetLeaderInfo, IsPeerConnected};
 use actix::Addr;
 use common::configuration::Configuration;
 use common::protocol::{SocketMessage, UNKNOWN_LEADER};
@@ -70,8 +70,12 @@ impl ConnectionGateway {
 
     async fn get_leader_information(
         connection_manager: &Addr<ConnectionManager>,
-    ) -> Result<(u32, bool), Box<dyn std::error::Error>> {
-        Ok((UNKNOWN_LEADER, false))
+    ) -> Result<Option<LeaderData>, Box<dyn std::error::Error>> {
+        if let Ok(leader) = connection_manager.send(GetLeaderInfo {}).await? {
+            Ok(leader)
+        } else {
+            Ok(None)
+        }
     }
 
     async fn send_connection_answer(
@@ -80,10 +84,18 @@ impl ConnectionGateway {
         addr: SocketAddr,
         connection_manager: Addr<ConnectionManager>,
         configuration: &Configuration,
+        id: u32,
+        _port: u32,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let (leader_port, is_current_server_leader) =
-            Self::get_leader_information(&connection_manager).await?;
+        let leader_data = Self::get_leader_information(&connection_manager).await?;
+
+        let (is_current_server_leader, leader_port) = match leader_data {
+            Some(leader_data) => (leader_data.id == id, leader_data.port),
+            None => (false, UNKNOWN_LEADER),
+        };
+
         let (is_connection_a_peer, peer_id) = Self::is_connection_a_peer(&addr, configuration);
+
         let msg: String = if is_connection_a_peer {
             Self::handle_incomming_peer_request(connection_manager, peer_id, leader_port, logger)
                 .await?
@@ -101,12 +113,15 @@ impl ConnectionGateway {
             ));
             Self::serialize_message(SocketMessage::ConnectionNotAvailable(leader_port))?
         };
+
         socket.send_to(msg.as_bytes(), addr).await?;
+
         Ok(())
     }
 
     pub async fn run(
         port: u32,
+        id: u32,
         logger: Logger,
         connection_manager: Addr<ConnectionManager>,
         configuration: Configuration,
@@ -141,6 +156,8 @@ impl ConnectionGateway {
                                 addr,
                                 connection_manager.clone(),
                                 &configuration,
+                                id,
+                                port,
                             )
                             .await?;
                         }

@@ -31,7 +31,6 @@ pub struct Server {
 
 impl Server {
     pub async fn new(id: u32, logger: Logger) -> Result<Server, Box<dyn std::error::Error>> {
-        let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new(id));
         let configuration = Configuration::new()?;
 
         let port_pair = configuration
@@ -49,6 +48,9 @@ impl Server {
             }
         };
 
+        let connection_manager = ConnectionManager::create(|_ctx| {
+            ConnectionManager::new(id, my_port, configuration.clone())
+        });
         let hearbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
@@ -142,12 +144,14 @@ impl Server {
     fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {
         let logger = Logger::new(Some("[CONN-GATEWAY]"));
         let port_clone = self.port;
+        let id_clone = self.id;
         let connection_manager = self.connection_manager.clone();
         let configuration = self.configuration.clone();
 
         spawn(async move {
             if let Err(e) = ConnectionGateway::run(
                 port_clone,
+                id_clone,
                 logger.clone(),
                 connection_manager,
                 configuration,
