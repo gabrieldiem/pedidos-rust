@@ -25,6 +25,11 @@ impl Logger {
         }
     }
 
+    /// Updates the logger prefix
+    pub fn update_prefix(&mut self, prefix: &str) {
+        self.prefix = format!("{prefix} ");
+    }
+
     /// Creates a new Logger with colors disabled (useful for testing)
     pub fn new_no_color(prefix: Option<&str>) -> Self {
         let mut logger = Self::new(prefix);

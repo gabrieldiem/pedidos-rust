@@ -2,7 +2,9 @@ use crate::connection_manager::ConnectionManager;
 use crate::messages::{ElectionCallReceived, ElectionCoordinatorReceived};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
 use actix_async_handler::async_handler;
-use common::protocol::{ElectionCall, ElectionCoordinator, ElectionOk, SocketMessage};
+use common::protocol::{
+    ElectionCall, ElectionCoordinator, ElectionOk, LivenessProbe, SocketMessage,
+};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
@@ -98,6 +100,20 @@ impl Handler<ElectionCoordinator> for ServerPeer {
             self.logger.error(&e.to_string());
             return;
         }
+    }
+}
+
+#[async_handler]
+impl Handler<LivenessProbe> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: LivenessProbe, _ctx: &mut Self::Context) -> Self::Result {
+        // let msg_to_send = SocketMessage::LivenessProbe;
+        //
+        // if let Err(e) = self.send_message(&msg_to_send) {
+        //     self.logger.error(&e.to_string());
+        //     return;
+        // }
     }
 }
 
