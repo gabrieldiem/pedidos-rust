@@ -1,10 +1,11 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, FindRider, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant,
-    RegisterRider, SendNotification, SendRestaurantList,
+    PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
+    RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
 };
 use crate::nearby_entitys::nearby_restaurants;
+use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::constants::NO_RESTAURANTS;
@@ -70,6 +71,8 @@ pub struct ConnectionManager {
     pub pending_delivery_requests: VecDeque<FindRider>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
+    pub server_peers: HashMap<u32, Addr<ServerPeer>>,
+    pub leader: Option<u32>,
 }
 
 impl ConnectionManager {
@@ -82,6 +85,8 @@ impl ConnectionManager {
             pending_delivery_requests: VecDeque::new(),
             restaurants: HashMap::new(),
             payment_system: None,
+            server_peers: HashMap::new(),
+            leader: None,
         }
     }
 
@@ -112,6 +117,22 @@ impl ConnectionManager {
 
 impl Actor for ConnectionManager {
     type Context = Context<Self>;
+}
+
+#[async_handler]
+impl Handler<RegisterPeerServer> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: RegisterPeerServer, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger
+            .debug(&format!("Registering Rider with ID {}", msg.id));
+        self.server_peers.entry(msg.id).or_insert(msg.address);
+        if msg.is_leader {
+            self.leader = Some(msg.id)
+        }
+        self.process_pending_requests();
+        self.logger.info(&format!("{:?}", self.server_peers));
+    }
 }
 
 #[async_handler]

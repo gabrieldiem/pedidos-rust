@@ -177,7 +177,7 @@ impl Customer {
 
         // Setting up connection
         let tcp_connector = TcpConnector::new(my_port, dest_ports.clone());
-        let stream = tcp_connector.connect().await?;
+        let stream = tcp_connector.connect(true).await?;
         let peer_address = stream.peer_addr()?;
         let peer_port = peer_address.port();
 

@@ -1,4 +1,4 @@
-use crate::client_connection::ClientConnection;
+use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
 use common::protocol::Location;
 
@@ -30,6 +30,14 @@ pub struct RegisterRestaurant {
 #[rtype(result = "()")]
 pub struct RegisterPaymentSystem {
     pub address: Addr<ClientConnection>,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct RegisterPeerServer {
+    pub id: u32,
+    pub address: Addr<ServerPeer>,
+    pub is_leader: bool,
 }
 
 #[derive(Message, Debug)]

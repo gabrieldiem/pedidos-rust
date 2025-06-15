@@ -2,6 +2,7 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
+use crate::messages::RegisterPeerServer;
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -9,7 +10,6 @@ use common::constants::DEFAULT_PR_HOST;
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::TcpListener;
@@ -70,14 +70,6 @@ impl Server {
                 return Err(msg.into());
             }
         };
-        let server_peers = Self::connect_server_peers(
-            id,
-            my_port,
-            configuration.clone(),
-            &logger,
-            connection_manager.clone(),
-        )
-        .await?;
         let hearbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
@@ -93,28 +85,26 @@ impl Server {
         })
     }
 
-    async fn connect_server_peers(
-        id: u32,
-        my_port: u32,
-        configuration: Configuration,
-        logger: &Logger,
-        connection_manager: Addr<ConnectionManager>,
-    ) -> Result<HashMap<u32, Addr<ServerPeer>>, Box<dyn std::error::Error>> {
-        let mut server_peers: HashMap<u32, Addr<ServerPeer>> = HashMap::new();
-
-        for port_pair in configuration.pedidos_rust.ports {
+    async fn connect_server_peers(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        for port_pair in self.configuration.pedidos_rust.ports.clone() {
+            let id = port_pair.id;
             let port = port_pair.port;
-            if port == id {
+            if id == self.id {
                 continue;
             }
+            let is_leader = Self::INITIAL_LEADER_ID == id;
 
-            let tcp_connector = TcpConnector::new(my_port, vec![port]);
-            let stream = match tcp_connector.connect().await {
+            let tcp_connector = TcpConnector::new(self.port, vec![port]);
+            let stream = match tcp_connector.connect(false).await {
                 Ok(stream) => stream,
                 Err(e) => {
+                    self.logger.warn(&format!("Srry bro, fucked up {e}"));
                     continue;
                 }
             };
+
+            self.logger
+                .info(&format!("Correctly connected to port {}", port));
 
             let peer = ServerPeer::create(|ctx| {
                 let (read_half, write_half) = split(stream);
@@ -126,20 +116,23 @@ impl Server {
                 }
                 .start();
 
-                logger.debug("Created ServerPeer");
+                self.logger.debug("Created ServerPeer");
 
                 ServerPeer {
                     tcp_sender,
                     logger: Logger::new(Some(&format!("[PEER-{port}]"))),
                     port,
-                    connection_manager: connection_manager.clone(),
+                    connection_manager: self.connection_manager.clone(),
                 }
             });
 
-            server_peers.insert(port, peer);
+            self.connection_manager.do_send(RegisterPeerServer {
+                id,
+                address: peer,
+                is_leader,
+            });
         }
-
-        Ok(server_peers)
+        Ok(1)
     }
 
     fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {
@@ -172,6 +165,8 @@ impl Server {
             "Listening for connections on {}",
             sockaddr_str.clone()
         ));
+
+        self.connect_server_peers().await?;
 
         self.run_connection_gateway()?;
 

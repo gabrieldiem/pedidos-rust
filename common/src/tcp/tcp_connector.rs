@@ -56,7 +56,7 @@ impl TcpConnector {
         port: u32,
         udp_socket: &UdpSocket,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        match Self::try_connection(port, udp_socket, &self.logger.clone()).await {
+        match Self::try_connection(port, udp_socket, &self.logger.clone(), false).await {
             Ok(_port) => {
                 self.logger
                     .debug(&format!("Liveness check for {port} passed"));
@@ -70,7 +70,10 @@ impl TcpConnector {
         }
     }
 
-    pub async fn connect(&self) -> Result<TcpStream, Box<dyn std::error::Error>> {
+    pub async fn connect(
+        &self,
+        connect_only_to_leader: bool,
+    ) -> Result<TcpStream, Box<dyn std::error::Error>> {
         let local_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.source_port as u16);
 
@@ -87,7 +90,14 @@ impl TcpConnector {
                 let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
                 self.logger
                     .debug(&format!("Trying to connect to {}", server_sockaddr));
-                match Self::try_connection(port, &socket, &self.logger.clone()).await {
+                match Self::try_connection(
+                    port,
+                    &socket,
+                    &self.logger.clone(),
+                    connect_only_to_leader,
+                )
+                .await
+                {
                     Ok(port) => {
                         self.logger
                             .debug(&format!("Found port to connect to: {}", port));
@@ -129,6 +139,7 @@ impl TcpConnector {
         port: u32,
         socket: &UdpSocket,
         logger: &Logger,
+        connect_only_to_leader: bool,
     ) -> Result<u32, Box<dyn std::error::Error>> {
         let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
         let msg = Self::serialize_message(SocketMessage::IsConnectionReady)?;
@@ -146,6 +157,9 @@ impl TcpConnector {
                 match received_msg {
                     SocketMessage::ConnectionAvailable => Ok(port),
                     SocketMessage::ConnectionNotAvailable(port_to_communicate) => {
+                        if !connect_only_to_leader {
+                            return Ok(port);
+                        }
                         logger.debug(&format!(
                             "Connection not available, but {port_to_communicate} is"
                         ));

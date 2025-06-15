@@ -29,9 +29,6 @@ impl ConnectionGateway {
         is_leader: bool,
         leader_port: Arc<Mutex<u32>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        
-        
-        
         let msg: String = if is_leader {
             logger.debug("Instance is leader. Connection available");
             Self::serialize_message(SocketMessage::ConnectionAvailable)?
