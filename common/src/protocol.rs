@@ -115,14 +115,35 @@ pub struct DeliveryOfferAccepted {
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
+pub struct DeliveryOfferDenied {
+    pub rider_id: u32,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct DeliveryOfferConfirmed {
+    pub customer_id: u32,
+    pub customer_location: Location,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct DeliveryOfferAlreadyAssigned {
+    pub customer_id: u32,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
 pub struct RiderArrivedAtCustomer {
     pub rider_id: u32,
+    pub customer_id: u32,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
 pub struct DeliveryDone {
     pub rider_id: u32,
+    pub customer_id: u32,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug)]
@@ -170,15 +191,16 @@ pub const UNKNOWN_LEADER: u32 = 0;
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
-    GetRestaurants(Location),            // Location is customer_location
-    Restaurants(String),                 // String is serialized json restaurants
-    Order(OrderContent),                 // OrderContent is the order content
-    PushNotification(String),            // String is the notification message
-    LocationUpdate(Location),            // Location is the new location
-    DeliveryOffer(u32, Location),        // u32 is customer_id, Location is customer location
-    DeliveryOfferAccepted(u32),          // u32 is customer_id
-    FinishDelivery(String),              // String is the reason for finishing the delivery
-    ExecutePayment(u32, f64),            // u32 is customer_id, f64 is amount
+    GetRestaurants(Location),              // Location is customer_location
+    Restaurants(String),                   // String is serialized json restaurants
+    Order(OrderContent),                   // OrderContent is the order content
+    PushNotification(String),              // String is the notification message
+    LocationUpdate(Location),              // Location is the new location
+    DeliveryOffer(u32, Location),          // u32 is customer_id, Location is customer location
+    DeliveryOfferAccepted(u32),            // u32 is customer_id
+    DeliveryOfferConfirmed(u32, Location), // u32 is customer_id, Location is customer location
+    FinishDelivery(String),                // String is the reason for finishing the delivery
+    ExecutePayment(u32, f64),              // u32 is customer_id, f64 is amount
     AuthorizePayment(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
     PaymentDenied(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
     PaymentAuthorized(u32, f64, String), // u32 is customer_id, f64 is amount
@@ -186,11 +208,11 @@ pub enum SocketMessage {
     PrepareOrder(u32, f64),          // u32 is customer_id, f64 is price
     OrderInProgress(u32),            // u32 is customer_id
     OrderCalcelled(u32),             // u32 is customer_id
-    OrderReady(u32),                 // u32 is customer_id
+    OrderReady(u32, Location),       // u32 is customer_id
     InformLocation(Location, String), // Location is the new location, String is the restaurant name
     RegisterPaymentSystem,
     RiderArrivedAtCustomer,
-    DeliveryDone,
+    DeliveryDone(u32), // u32 is customer_id
     IsConnectionReady,
     ConnectionAvailable,
     ConnectionNotAvailable(u32), // u32 is the port of the available connection, can be UNKNOWN_LEADER

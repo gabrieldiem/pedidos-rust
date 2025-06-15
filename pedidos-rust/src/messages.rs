@@ -22,6 +22,7 @@ pub struct RegisterCustomer {
 pub struct RegisterRider {
     pub id: u32,
     pub address: Addr<ClientConnection>,
+    pub location: Location,
 }
 
 #[derive(Message, Debug)]
@@ -101,6 +102,7 @@ pub struct OrderRequest {
 #[rtype(result = "()")]
 pub struct OrderReady {
     pub customer_id: u32,
+    pub restaurant_location: Location,
 }
 
 #[derive(Message, Debug)]
@@ -113,6 +115,7 @@ pub struct OrderCancelled {
 #[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
+    pub restaurant_location: Location,
 }
 
 #[derive(Message, Debug)]
