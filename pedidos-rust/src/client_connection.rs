@@ -299,15 +299,6 @@ impl Handler<RiderArrivedAtCustomer> for ClientConnection {
 }
 
 #[async_handler]
-impl Handler<DeliveryDone> for ClientConnection {
-    type Result = ();
-
-    async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
-        self.connection_manager.do_send(msg);
-    }
-}
-
-#[async_handler]
 impl Handler<FinishDelivery> for ClientConnection {
     type Result = ();
 
@@ -354,8 +345,10 @@ impl ClientConnection {
                         .do_send(RiderArrivedAtCustomer { rider_id: self.id });
                 }
                 SocketMessage::DeliveryDone => {
-                    self.logger.debug("Rider finished the delivery");
-                    ctx.address().do_send(DeliveryDone { rider_id: self.id });
+                    self.logger
+                        .debug(&format!("Rider {} finished the delivery", self.id));
+                    self.connection_manager
+                        .do_send(DeliveryDone { rider_id: self.id });
                 }
                 SocketMessage::InformLocation(location, name) => {
                     self.logger.debug("A new restaurant wants to register");

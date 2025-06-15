@@ -4,7 +4,7 @@ use crate::messages::{
     PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterRestaurant,
     RegisterRider, SendNotification, SendRestaurantList,
 };
-use crate::nearby_entitys::{manhattan_distance, nearby_restaurants};
+use crate::nearby_entitys::{closest_riders, nearby_restaurants};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
@@ -361,7 +361,8 @@ impl Handler<OrderReady> for ConnectionManager {
             customer.address.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });
-
+            self.logger
+                .debug(&format!("Finding a rider for customer {}", msg.customer_id));
             ctx.address().do_send(FindRider {
                 customer_id: msg.customer_id,
                 restaurant_location: msg.restaurant_location,
@@ -407,35 +408,19 @@ impl Handler<FindRider> for ConnectionManager {
             }
         };
 
-        let mut nearby_riders: Vec<_> = self
-            .riders
-            .iter()
-            .filter_map(|(_rider_id, rider_data)| {
-                rider_data.location.map(|loc| {
-                    let distance = manhattan_distance(&loc, &msg.restaurant_location);
-                    (distance, rider_data.address.clone())
-                })
-            })
-            .collect();
+        let closest = closest_riders(&msg.restaurant_location, &self.riders, N_RIDERS_TO_NOTIFY);
 
-        nearby_riders.sort_by_key(|(distance, _)| *distance);
-
-        let closest_riders = nearby_riders.into_iter().take(N_RIDERS_TO_NOTIFY);
-
-        let mut sent_to_any = false;
-
-        for (_, rider_address) in closest_riders {
-            rider_address.do_send(DeliveryOffer {
-                customer_id: msg.customer_id,
-                customer_location: *customer_loc,
-            });
-            sent_to_any = true;
-        }
-
-        if !sent_to_any {
+        if closest.is_empty() {
             self.logger
-                .warn("There are no riders with a location registered, adding to pending requests");
+                .warn("No riders with valid location, adding to pending requests");
             self.pending_delivery_requests.push_back(msg);
+        } else {
+            for addr in closest {
+                addr.do_send(DeliveryOffer {
+                    customer_id: msg.customer_id,
+                    customer_location: *customer_loc,
+                });
+            }
         }
     }
 }
@@ -497,45 +482,40 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
     }
 }
 
-// TODO: se debe ejecutar el pago antes de enviar FinishDelivery
 #[async_handler]
 impl Handler<DeliveryDone> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
-        let possible_customer_id = self.orders_in_process.get(&msg.rider_id).copied();
+        self.logger.debug("Entering DeliveryDone handler");
+        let Some(&customer_id) = self.orders_in_process.get(&msg.rider_id) else {
+            self.logger.warn("Failed finding order in progress");
+            return;
+        };
 
-        match possible_customer_id {
-            Some(customer_id) => {
-                match self.customers.get(&customer_id) {
-                    Some(customer) => match self.orders_in_process.remove(&msg.rider_id) {
-                        Some(_) => {
-                            self.logger.debug("Removed finished order");
-                            let execute_payment_msg = ExecutePayment {
-                                customer_id,
-                                price: customer.order_price.unwrap_or(0.0),
-                            };
-                            if let Some(payment_system) = &self.payment_system {
-                                payment_system.do_send(execute_payment_msg);
-                            } else {
-                                self.logger
-                                    .warn("Failed to find payment system when finishing delivery");
-                            }
-                        }
-                        None => {
-                            self.logger.debug("No order found to be removed");
-                        }
-                    },
+        let Some(customer) = self.customers.get(&customer_id) else {
+            self.logger.warn("Failed finding customer");
+            return;
+        };
 
-                    None => {
-                        self.logger.warn("Failed finding customer");
-                    }
-                };
-            }
+        if self.orders_in_process.remove(&msg.rider_id).is_none() {
+            self.logger
+                .warn("Expected order to exist for removal but it was missing");
+            return;
+        }
 
-            None => {
-                self.logger.warn("Failed finding order in progress");
-            }
+        self.logger.debug("Removed finished order");
+
+        let execute_payment_msg = ExecutePayment {
+            customer_id,
+            price: customer.order_price.unwrap_or(0.0),
+        };
+
+        if let Some(payment_system) = &self.payment_system {
+            payment_system.do_send(execute_payment_msg);
+        } else {
+            self.logger
+                .warn("Failed to find payment system when finishing delivery");
         }
     }
 }
