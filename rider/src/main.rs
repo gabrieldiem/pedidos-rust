@@ -214,7 +214,6 @@ impl Rider {
                     });
                 }
                 SocketMessage::DeliveryOfferConfirmed(customer_id, customer_location) => {
-                    // HACER LO QUE AHORA HACE DELIVERY OFFER
                     ctx.address().do_send(DeliveryOfferConfirmed {
                         customer_id,
                         customer_location,
