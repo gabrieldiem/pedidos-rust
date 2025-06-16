@@ -1,6 +1,10 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterNextPeerServer, RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList, UpdateCustomer
+    AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
+    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
+    PaymentExecuted, RegisterCustomer, RegisterNextPeerServer, RegisterPaymentSystem,
+    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
+    UpdateCustomer,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -11,7 +15,8 @@ use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
-    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, UpdateCustomerData
+    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
+    UpdateCustomerData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -37,7 +42,7 @@ pub struct OrderData {
     pub rider_id: Option<RiderId>,
     pub order_price: Option<f64>,
     pub customer_location: Location,
-    pub customer_id: CustomerId
+    pub customer_id: CustomerId,
 }
 
 #[derive(Debug, Clone)]
@@ -558,7 +563,7 @@ impl Handler<OrderRequest> for ConnectionManager {
                         return;
                     }
                 },
-                customer_id: msg.customer_id
+                customer_id: msg.customer_id,
             },
         );
         if let Some(restaurant) = self.restaurants.get(&msg.restaurant_name) {
@@ -691,21 +696,21 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                 let notification_msg =
                     format!("The rider {} will deliver your order", msg.rider_id);
                 customer_adress.do_send(PushNotification { notification_msg });
-                if let Some(customer_data) = self.customers.get(&msg.customer_id){
+                if let Some(customer_data) = self.customers.get(&msg.customer_id) {
                     self.orders_in_process.insert(
-                        msg.rider_id, 
-                        OrderData { 
-                            rider_id: Some(msg.rider_id), 
-                            order_price: customer_data.order_price, 
-                            customer_location: customer_data.location ,
-                            customer_id: msg.customer_id
-                        });
+                        msg.rider_id,
+                        OrderData {
+                            rider_id: Some(msg.rider_id),
+                            order_price: customer_data.order_price,
+                            customer_location: customer_data.location,
+                            customer_id: msg.customer_id,
+                        },
+                    );
                 }
-            },
-            None => {self.logger.warn(&format!(
-                        "No customer {} founr",
-                        msg.customer_id
-                    ))}
+            }
+            None => self
+                .logger
+                .warn(&format!("No customer {} founr", msg.customer_id)),
         }
         match self.orders_in_process.get_mut(&msg.customer_id) {
             Some(order_data) => {
@@ -729,11 +734,11 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                             customer_location: order_data.customer_location,
                         });
                     }
-                    if let Some(customer_address) = self.customer_connections.get(&msg.customer_id) {
+                    if let Some(customer_address) = self.customer_connections.get(&msg.customer_id)
+                    {
                         let notification_msg =
                             format!("El rider {} entregará tu pedido", msg.rider_id);
-                        customer_address
-                            .do_send(PushNotification { notification_msg });
+                        customer_address.do_send(PushNotification { notification_msg });
                     }
                 }
             }
@@ -754,7 +759,7 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         match self.orders_in_process.get(&msg.rider_id) {
-            Some(OrderData {customer_id, ..}) => {
+            Some(OrderData { customer_id, .. }) => {
                 match self.customer_connections.get(customer_id) {
                     Some(customer_adress) => {
                         let notification_msg = "The rider is outside! Pick up the order".to_owned();

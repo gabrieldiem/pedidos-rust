@@ -139,7 +139,6 @@ pub struct UpdateCustomer {
     pub order_price: Option<f64>,
 }
 
-
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct ElectionCallReceived {}

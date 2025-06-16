@@ -3,7 +3,7 @@ use crate::messages::{ElectionCallReceived, ElectionCoordinatorReceived};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, LivenessProbe, SocketMessage, UpdateCustomerData
+    ElectionCall, ElectionCoordinator, ElectionOk, LivenessProbe, SocketMessage, UpdateCustomerData,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;

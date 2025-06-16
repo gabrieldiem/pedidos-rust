@@ -5,7 +5,7 @@ use crate::heartbeat::HeartbeatMonitor;
 use crate::messages::{RegisterPeerServer, Start};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
-use common::configuration::{Configuration, SinglePedidosRustInfo};
+use common::configuration::Configuration;
 use common::constants::DEFAULT_PR_HOST;
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
@@ -184,7 +184,7 @@ impl Server {
                 connection_manager: self.connection_manager.clone(),
             }
         });
-        
+
         self.connection_manager.do_send(RegisterPeerServer {
             id: peer_id,
             address: server_peer,
