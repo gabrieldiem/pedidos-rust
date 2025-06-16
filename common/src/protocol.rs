@@ -192,16 +192,16 @@ pub const UNKNOWN_LEADER: u32 = 0;
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
-    GetRestaurants(Location, bool),        // Location is customer_location, bool is new_customer
-    Restaurants(String),                   // String is serialized json restaurants
-    Order(OrderContent),                   // OrderContent is the order content
-    PushNotification(String),              // String is the notification message
-    LocationUpdate(Location),              // Location is the new location
-    DeliveryOffer(u32, Location),          // u32 is customer_id, Location is customer location
-    DeliveryOfferAccepted(u32),            // u32 is customer_id
+    GetRestaurants(Location, bool), // Location is customer_location, bool is new_customer
+    Restaurants(String),            // String is serialized json restaurants
+    Order(OrderContent),            // OrderContent is the order content
+    PushNotification(String),       // String is the notification message
+    LocationUpdate(Location),       // Location is the new location
+    DeliveryOffer(u32, Location),   // u32 is customer_id, Location is customer location
+    DeliveryOfferAccepted(u32),     // u32 is customer_id
     DeliveryOfferConfirmed(u32, Location), // u32 is customer_id, Location is customer location
-    FinishDelivery(String),                // String is the reason for finishing the delivery
-    ExecutePayment(u32, f64),              // u32 is customer_id, f64 is amount
+    FinishDelivery(String),         // String is the reason for finishing the delivery
+    ExecutePayment(u32, f64),       // u32 is customer_id, f64 is amount
     AuthorizePayment(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
     PaymentDenied(u32, f64, String), // u32 is customer_id, f64 is amount, String is restaurant name
     PaymentAuthorized(u32, f64, String), // u32 is customer_id, f64 is amount

@@ -256,10 +256,9 @@ impl Server {
 
         self.heartbeat_monitor
             .do_send(StartHeartbeat { udp_socket });
-        
-        self.connection_manager.do_send(ElectionCoordinatorReceived {
-            leader_port: self.port,
-        });
+
+        self.connection_manager
+            .do_send(ElectionCoordinatorReceived { leader_port: 7501 });
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, peer_id) =

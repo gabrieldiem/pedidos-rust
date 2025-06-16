@@ -2,9 +2,8 @@ use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
     IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
-    PaymentExecuted, RegisterCustomer, RegisterNextPeerServer, RegisterPaymentSystem,
-    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
-    UpdateCustomerData,
+    PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
+    RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList, UpdateCustomerData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -92,7 +91,7 @@ pub struct ConnectionManager {
     pub pending_delivery_requests: VecDeque<FindRider>,
 
     // Peers
-    pub next_server_peer: Option<Addr<ServerPeer>>,
+    pub next_server_peer: Option<(PeerId, Addr<ServerPeer>)>,
     pub server_peers: HashMap<PeerId, Addr<ServerPeer>>,
     pub leader: Option<LeaderData>,
     pub election_in_progress: bool,
@@ -271,37 +270,16 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
         } else {
             updated_next_peer_id = *greater_peers.iter().min().unwrap_or(&&0);
         }
-        self.next_server_peer = Some(
+        self.next_server_peer = Some((
+            *updated_next_peer_id,
             self.server_peers
                 .get(&updated_next_peer_id)
                 .unwrap() // already checked the peer exists before
                 .clone(),
-        );
+        ));
         self.logger.info(&format!(
             "Updated next peer server to peer no {updated_next_peer_id}"
         ));
-        self.process_pending_requests();
-    }
-}
-
-#[async_handler]
-impl Handler<RegisterNextPeerServer> for ConnectionManager {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        msg: RegisterNextPeerServer,
-        _ctx: &mut Self::Context,
-    ) -> Self::Result {
-        self.logger
-            .debug(&format!("Registering server peer with ID {}", msg.id));
-        match self.server_peers.get(&msg.id) {
-            Some(address) => self.next_server_peer = Some(address.clone()),
-            None => {
-                self.logger
-                    .info(&format!("Failed choosing {} as next server peer ", msg.id));
-            }
-        }
         self.process_pending_requests();
     }
 }
@@ -358,7 +336,7 @@ impl Handler<RegisterCustomer> for ConnectionManager {
         self.customer_connections
             .entry(msg.id)
             .or_insert(msg.address);
-        if let Some(peer) = &self.next_server_peer {
+        if let Some((_, peer)) = &self.next_server_peer {
             peer.do_send(SendUpdateCustomerData {
                 customer_id: msg.id,
                 location: msg.location,
@@ -546,7 +524,7 @@ impl Handler<OrderRequest> for ConnectionManager {
         ));
         if let Some(customer) = self.customers.get_mut(&msg.customer_id) {
             customer.order_price = Some(msg.order_price);
-            if let Some(peer) = &self.next_server_peer {
+            if let Some((_, peer)) = &self.next_server_peer {
                 peer.do_send(UpdateCustomerData {
                     customer_id: msg.customer_id,
                     location: customer.location,
@@ -874,6 +852,19 @@ impl Handler<UpdateCustomerData> for ConnectionManager {
                 location: msg.location,
                 order_price: msg.order_price,
             });
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendUpdateCustomerData {
+                        customer_id: msg.customer_id,
+                        location: msg.location,
+                        order_price: msg.order_price,
+                    });
+                }
+            }
+        };
 
         self.logger.info(&format!(
             "Updated customer {} with {:?} location and {:?} price",

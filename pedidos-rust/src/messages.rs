@@ -139,7 +139,7 @@ pub struct SendNotification {
     pub recipient_id: u32, // ID of the recipient aka receiver of the notification
 }
 
-#[derive(Message, Debug)]
+#[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct UpdateCustomerData {
     pub customer_id: u32,
