@@ -1,7 +1,7 @@
 use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
-    LivenessProbe, PeerDisconnected, StartHeartbeat,
+    LivenessProbe, PeerDisconnected, StartHeartbeat, UpdateCustomerData,
 };
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,

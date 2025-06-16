@@ -1,9 +1,10 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
-    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
-    PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
-    RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList, UpdateCustomerData,
+    IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
+    PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterPaymentSystem,
+    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
+    StartHeartbeat, UpdateCustomerData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -333,7 +334,10 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
             greater_peers.iter().min().unwrap_or(&&0)
         };
 
-        self.next_server_peer = Some(self.server_peers.get(updated_next_peer_id).unwrap().clone());
+        self.next_server_peer = Some((
+            *updated_next_peer_id,
+            self.server_peers.get(updated_next_peer_id).unwrap().clone(),
+        ));
         self.logger.info(&format!(
             "Updated next peer server to peer no {updated_next_peer_id}"
         ));

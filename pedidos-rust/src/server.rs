@@ -288,8 +288,8 @@ impl Server {
 
         self.start_heartbeats_of_peers(udp_socket.clone()).await;
 
-        self.connection_manager
-            .do_send(ElectionCoordinatorReceived { leader_port: 7501 });
+        // self.connection_manager
+        //     .do_send(ElectionCoordinatorReceived { leader_port: 7501 });
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, peer_id) =
