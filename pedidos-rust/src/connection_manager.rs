@@ -23,7 +23,6 @@ use common::protocol::{
     SendUpdateRestaurantData, SendUpdateRiderData,
 };
 use common::utils::logger::Logger;
-use futures::stream::TryChunksError;
 use std::collections::{HashMap, VecDeque};
 
 type CustomerId = u32;
