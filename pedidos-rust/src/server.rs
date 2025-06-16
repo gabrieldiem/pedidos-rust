@@ -200,7 +200,7 @@ impl Server {
         peer_sockaddr: SocketAddr,
         stream: TcpStream,
         peer_id: u32,
-        udp_socket: Arc<UdpSocket>,
+        _udp_socket: Arc<UdpSocket>,
     ) {
         self.logger
             .info(&format!("Peer connected: {peer_sockaddr}"));

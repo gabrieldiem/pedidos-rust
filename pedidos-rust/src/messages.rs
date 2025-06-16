@@ -153,6 +153,13 @@ pub struct UpdateCustomerData {
     pub order_price: Option<f64>,
 }
 
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct UpdateRestaurantData {
+    pub restaurant_name: String,
+    pub location: Location,
+}
+
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct ElectionCallReceived {}

@@ -1,7 +1,7 @@
 use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
-    LivenessProbe, PeerDisconnected, StartHeartbeat, UpdateCustomerData,
+    LivenessProbe, PeerDisconnected, StartHeartbeat, UpdateCustomerData, UpdateRestaurantData,
 };
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
@@ -10,7 +10,8 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData, SocketMessage,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData,
+    SendUpdateRestaurantData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -359,10 +360,29 @@ impl Handler<SendUpdateCustomerData> for ServerPeer {
     }
 }
 
+#[async_handler]
+impl Handler<SendUpdateRestaurantData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdateRestaurantData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdateRestaurantData(
+            msg.restaurant_name,
+            msg.location,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
 impl ServerPeer {
-    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 3;
-    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 5;
-    pub const MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD: u64 = 2;
+    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 12;
+    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 20;
+    pub const MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD: u64 = 8;
 
     pub fn new(
         tcp_sender: Addr<TcpSender>,
@@ -406,6 +426,14 @@ impl ServerPeer {
                         customer_id,
                         location,
                         order_price,
+                    })
+                }
+                SocketMessage::UpdateRestaurantData(restaurant_name, location) => {
+                    self.logger
+                        .info(&format!("Updating data for restaurant {restaurant_name}"));
+                    self.connection_manager.do_send(UpdateRestaurantData {
+                        restaurant_name,
+                        location,
                     })
                 }
                 _ => {

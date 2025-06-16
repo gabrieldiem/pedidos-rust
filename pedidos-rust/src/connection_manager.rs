@@ -4,7 +4,7 @@ use crate::messages::{
     IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
     PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterPaymentSystem,
     RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
-    StartHeartbeat, UpdateCustomerData,
+    StartHeartbeat, UpdateCustomerData, UpdateRestaurantData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -16,7 +16,7 @@ use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
     Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
-    SendUpdateCustomerData,
+    SendUpdateCustomerData, SendUpdateRestaurantData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -62,13 +62,12 @@ impl CustomerData {
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RestaurantData {
-    pub address: Addr<ClientConnection>,
     pub location: Location,
 }
 
 impl RestaurantData {
-    pub fn new(address: Addr<ClientConnection>, location: Location) -> RestaurantData {
-        RestaurantData { address, location }
+    pub fn new(location: Location) -> RestaurantData {
+        RestaurantData { location }
     }
 }
 
@@ -85,6 +84,7 @@ pub struct ConnectionManager {
     pub customers: HashMap<CustomerId, CustomerData>,
     pub rider_connections: HashMap<RiderId, Addr<ClientConnection>>,
     pub riders: HashMap<RiderId, RiderData>,
+    pub restaurant_connections: HashMap<RestaurantName, Addr<ClientConnection>>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
 
@@ -111,6 +111,7 @@ impl ConnectionManager {
             customers: HashMap::new(),
             orders_in_process: HashMap::new(),
             pending_delivery_requests: VecDeque::new(),
+            restaurant_connections: HashMap::new(),
             restaurants: HashMap::new(),
             payment_system: None,
             server_peers: HashMap::new(),
@@ -418,8 +419,19 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
             msg.id, msg.name
         ));
         self.restaurants
-            .entry(msg.name)
-            .or_insert(RestaurantData::new(msg.address, msg.location));
+            .entry(msg.name.clone())
+            .or_insert(RestaurantData::new(msg.location));
+        self.restaurant_connections
+            .entry(msg.name.clone())
+            .or_insert(msg.address);
+
+        if let Some((_, peer)) = &self.next_server_peer {
+            peer.do_send(SendUpdateRestaurantData {
+                restaurant_name: msg.name,
+                location: msg.location,
+            });
+        }
+
         self.process_pending_requests();
     }
 }
@@ -612,8 +624,8 @@ impl Handler<OrderRequest> for ConnectionManager {
                 customer_id: msg.customer_id,
             },
         );
-        if let Some(restaurant) = self.restaurants.get(&msg.restaurant_name) {
-            restaurant.address.do_send(OrderToRestaurant {
+        if let Some(restaurant_address) = self.restaurant_connections.get(&msg.restaurant_name) {
+            restaurant_address.do_send(OrderToRestaurant {
                 customer_id: msg.customer_id,
                 price: msg.order_price,
             });
@@ -931,6 +943,42 @@ impl Handler<UpdateCustomerData> for ConnectionManager {
         self.logger.info(&format!(
             "Updated customer {} with {:?} location and {:?} price",
             msg.customer_id, msg.location, msg.order_price
-        ))
+        ));
+
+        self.process_pending_requests();
+    }
+}
+
+impl Handler<UpdateRestaurantData> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: UpdateRestaurantData, _ctx: &mut Self::Context) -> Self::Result {
+        self.restaurants
+            .entry(msg.restaurant_name.clone())
+            .and_modify(|data| {
+                data.location = msg.location;
+            })
+            .or_insert(RestaurantData {
+                location: msg.location,
+            });
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendUpdateRestaurantData {
+                        restaurant_name: msg.restaurant_name.clone(),
+                        location: msg.location,
+                    });
+                }
+            }
+        };
+
+        self.logger.info(&format!(
+            "Updated restaurant {} with {:?} location",
+            msg.restaurant_name, msg.location
+        ));
+
+        self.process_pending_requests();
     }
 }
