@@ -178,14 +178,6 @@ pub struct ElectionOk {}
 #[rtype(result = "()")]
 pub struct ElectionCoordinator {}
 
-#[derive(Message, Serialize, Deserialize, Debug)]
-#[rtype(result = "()")]
-pub struct LivenessProbe {}
-
-#[derive(Message, Serialize, Deserialize, Debug)]
-#[rtype(result = "()")]
-pub struct LivenessEcho {}
-
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]

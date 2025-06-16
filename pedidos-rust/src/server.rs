@@ -2,7 +2,7 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
-use crate::messages::{RegisterPeerServer, Start};
+use crate::messages::{RegisterPeerServer, StartHeartbeat};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -11,9 +11,10 @@ use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpStream, UdpSocket};
 use tokio::spawn;
 use tokio_stream::wrappers::LinesStream;
 
@@ -22,7 +23,7 @@ pub struct Server {
     id: u32,
     logger: Logger,
     configuration: Configuration,
-    hearbeat_monitor: Addr<HeartbeatMonitor>,
+    heartbeat_monitor: Addr<HeartbeatMonitor>,
     connection_manager: Addr<ConnectionManager>,
     port: u32,
     ports_for_peers: Vec<u32>,
@@ -51,7 +52,7 @@ impl Server {
         let connection_manager = ConnectionManager::create(|_ctx| {
             ConnectionManager::new(id, my_port, configuration.clone())
         });
-        let hearbeat_monitor =
+        let heartbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
         let mut ports_for_peers_in_use: HashMap<u32, bool> = HashMap::new();
@@ -63,7 +64,7 @@ impl Server {
             id,
             logger,
             configuration,
-            hearbeat_monitor,
+            heartbeat_monitor,
             connection_manager,
             port: my_port,
             ports_for_peers,
@@ -94,14 +95,14 @@ impl Server {
 
     async fn connect_server_peers(&mut self) -> Result<u64, Box<dyn std::error::Error>> {
         for port_pair in self.configuration.pedidos_rust.infos.clone() {
-            let id = port_pair.id;
-            let port = port_pair.port;
-            if id == self.id {
+            let peer_id = port_pair.id;
+            let peer_port = port_pair.port;
+            if peer_id == self.id {
                 continue;
             }
 
             let port_for_peer = self.choose_port_for_peer()?;
-            let tcp_connector = TcpConnector::new(port_for_peer, vec![port]);
+            let tcp_connector = TcpConnector::new(port_for_peer, vec![peer_port]);
             let stream = match tcp_connector.connect().await {
                 Ok(stream) => stream,
                 Err(e) => {
@@ -113,7 +114,7 @@ impl Server {
             };
 
             self.logger
-                .info(&format!("Correctly connected to port {}", port));
+                .info(&format!("Correctly connected to port {}", peer_port));
 
             let peer = ServerPeer::create(|ctx| {
                 let (read_half, write_half) = split(stream);
@@ -129,24 +130,45 @@ impl Server {
 
                 ServerPeer {
                     tcp_sender,
-                    logger: Logger::new(Some(&format!("[PEER-{port}]"))),
-                    port,
+                    logger: Logger::new(Some(&format!("[PEER-{peer_port}]"))),
+                    port: self.port,
+                    peer_port,
                     connection_manager: self.connection_manager.clone(),
                 }
             });
 
-            self.connection_manager
-                .do_send(RegisterPeerServer { id, address: peer });
+            self.connection_manager.do_send(RegisterPeerServer {
+                id: peer_id,
+                address: peer,
+            });
         }
         Ok(1)
     }
 
-    fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {
+    async fn run_connection_gateway(&self) -> Result<Arc<UdpSocket>, Box<dyn std::error::Error>> {
         let logger = Logger::new(Some("[CONN-GATEWAY]"));
         let port_clone = self.port;
         let id_clone = self.id;
         let connection_manager = self.connection_manager.clone();
+        let heartbeat_monitor = self.heartbeat_monitor.clone();
         let configuration = self.configuration.clone();
+
+        let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_clone as u16);
+
+        let socket = match UdpSocket::bind(local_addr).await {
+            Ok(socket) => Arc::new(socket),
+            Err(e) => {
+                logger.error(&format!("Could not get UDP socket: {e}"));
+                return Err(e.into());
+            }
+        };
+
+        logger.info(&format!(
+            "Connection Gateway over UDP listening on {}",
+            local_addr
+        ));
+
+        let socket_ref = socket.clone();
 
         spawn(async move {
             if let Err(e) = ConnectionGateway::run(
@@ -154,7 +176,9 @@ impl Server {
                 id_clone,
                 logger.clone(),
                 connection_manager,
+                heartbeat_monitor,
                 configuration,
+                socket_ref,
             )
             .await
             {
@@ -162,13 +186,13 @@ impl Server {
             }
         });
 
-        Ok(())
+        Ok(socket)
     }
 
     fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream, peer_id: u32) {
         self.logger
             .info(&format!("Peer connected: {peer_sockaddr}"));
-        let port = peer_sockaddr.port() as u32;
+        let peer_port = peer_sockaddr.port() as u32;
 
         let server_peer = ServerPeer::create(|ctx| {
             let (read_half, write_half) = split(stream);
@@ -184,8 +208,9 @@ impl Server {
 
             ServerPeer {
                 tcp_sender,
-                logger: Logger::new(Some(&format!("[PEER-{port}]"))),
-                port,
+                logger: Logger::new(Some(&format!("[PEER-{peer_port}]"))),
+                port: self.port,
+                peer_port,
                 connection_manager: self.connection_manager.clone(),
             }
         });
@@ -232,9 +257,10 @@ impl Server {
 
         self.connect_server_peers().await?;
 
-        self.run_connection_gateway()?;
+        let udp_socket = self.run_connection_gateway().await?;
 
-        self.hearbeat_monitor.do_send(Start {});
+        self.heartbeat_monitor
+            .do_send(StartHeartbeat { udp_socket });
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, peer_id) =
