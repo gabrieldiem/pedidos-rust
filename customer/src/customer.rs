@@ -82,7 +82,9 @@ impl Handler<ChooseRestaurant> for Customer {
 
     async fn handle(&mut self, msg: ChooseRestaurant, _ctx: &mut Self::Context) -> Self::Result {
         if msg.restaurants.trim() == NO_RESTAURANTS {
-            self.logger.info(&msg.restaurants);
+            _ctx.address().do_send(FinishDelivery {
+                reason: "No hay restaurantes disponibles en el momento".to_string(),
+            });
             return;
         }
 
