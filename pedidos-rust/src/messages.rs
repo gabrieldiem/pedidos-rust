@@ -19,6 +19,12 @@ pub struct StartHeartbeat {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct PeerDisconnected {
+    pub peer_id: PeerId,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct RegisterCustomer {
     pub id: u32,
     pub address: Addr<ClientConnection>,
@@ -173,4 +179,6 @@ pub struct LivenessProbe {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct LivenessEcho {}
+pub struct LivenessEcho {
+    pub origin_port: u32,
+}

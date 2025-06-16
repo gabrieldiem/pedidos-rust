@@ -1,9 +1,10 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
-    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
-    PaymentExecuted, RegisterCustomer, RegisterNextPeerServer, RegisterPaymentSystem,
-    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
+    IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
+    PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterNextPeerServer,
+    RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification,
+    SendRestaurantList, StartHeartbeat,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -147,6 +148,69 @@ impl Actor for ConnectionManager {
     type Context = Context<Self>;
 }
 
+impl Handler<LivenessEcho> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: LivenessEcho, _ctx: &mut Self::Context) -> Self::Result {
+        let origin_port = msg.origin_port;
+        let origin = self
+            .configuration
+            .pedidos_rust
+            .infos
+            .iter()
+            .find(|info| info.port == origin_port);
+
+        match origin {
+            Some(origin) => match self.server_peers.get(&origin.id) {
+                Some(peer_addr) => peer_addr.do_send(LivenessEcho { origin_port }),
+                None => {
+                    self.logger.warn(&format!(
+                        "LivenessEcho from {} did not match any registered port",
+                        origin_port
+                    ));
+                }
+            },
+            None => {
+                self.logger.warn(&format!(
+                    "LivenessEcho from {} did not match any registered port",
+                    origin_port
+                ));
+            }
+        }
+    }
+}
+
+impl Handler<PeerDisconnected> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: PeerDisconnected, _ctx: &mut Self::Context) -> Self::Result {
+        let peer_id = msg.peer_id;
+        self.logger
+            .warn(&format!("Peer with id {peer_id} disconnected"));
+    }
+}
+
+impl Handler<StartHeartbeat> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
+        for peer_id in self.server_peers.keys() {
+            if *peer_id > self.id {
+                match self.server_peers.get(peer_id) {
+                    Some(peer_addr) => {
+                        peer_addr.do_send(StartHeartbeat {
+                            udp_socket: msg.udp_socket.clone(),
+                        });
+                    }
+                    None => {
+                        self.logger.warn("No peer found");
+                    }
+                };
+            }
+        }
+    }
+}
+
 #[async_handler]
 impl Handler<GetPeers> for ConnectionManager {
     type Result = Result<HashMap<PeerId, Addr<ServerPeer>>, ()>;
@@ -253,29 +317,23 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: RegisterPeerServer, _ctx: &mut Self::Context) -> Self::Result {
+        let peer_address = msg.address;
         self.logger
             .debug(&format!("Registering server peer with ID {}", msg.id));
         self.server_peers
             .entry(msg.id)
-            .or_insert(msg.address.clone());
+            .or_insert(peer_address.clone());
 
-        let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) = self
-            .server_peers
-            .keys()
-            .into_iter()
-            .partition(|&n| *n <= self.id);
-        let updated_next_peer_id;
-        if greater_peers.is_empty() {
-            updated_next_peer_id = *lesser_peers.iter().min().unwrap_or(&&0);
+        let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) =
+            self.server_peers.keys().partition(|&n| *n <= self.id);
+
+        let updated_next_peer_id: &u32 = if greater_peers.is_empty() {
+            lesser_peers.iter().min().unwrap_or(&&0)
         } else {
-            updated_next_peer_id = *greater_peers.iter().min().unwrap_or(&&0);
-        }
-        self.next_server_peer = Some(
-            self.server_peers
-                .get(&updated_next_peer_id)
-                .unwrap()
-                .clone(),
-        );
+            greater_peers.iter().min().unwrap_or(&&0)
+        };
+
+        self.next_server_peer = Some(self.server_peers.get(updated_next_peer_id).unwrap().clone());
         self.logger.info(&format!(
             "Updated next peer server to peer no {updated_next_peer_id}"
         ));
