@@ -1,5 +1,6 @@
 use crate::client_connection::ClientConnection;
 use crate::connection_manager::{RestaurantData, RiderData};
+use actix::Addr;
 use common::constants::MAX_DISTANCE_RESTAURANTS;
 use common::protocol::Location;
 use std::collections::HashMap;
@@ -69,14 +70,16 @@ impl NearbyEntities {
     pub fn closest_riders<'a>(
         target_location: &Location,
         riders: &'a HashMap<u32, RiderData>,
+        rider_connections: &'a HashMap<u32, Addr<ClientConnection>>,
         n: usize,
     ) -> Vec<&'a actix::Addr<ClientConnection>> {
         let mut riders_with_distance: Vec<_> = riders
-            .values()
-            .filter_map(|rider_data| {
+            .into_iter()
+            .filter_map(|(rider_id, rider_data)| {
                 rider_data.location.map(|loc| {
                     let dist = Self::manhattan_distance(&loc, target_location);
-                    (dist, &rider_data.address)
+                    let rider_adress = rider_connections.get(rider_id).unwrap(); // confirmed to exist
+                    (dist, rider_adress)
                 })
             })
             .collect();

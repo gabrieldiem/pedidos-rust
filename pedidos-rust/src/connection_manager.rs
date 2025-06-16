@@ -32,7 +32,6 @@ pub struct LeaderData {
 
 #[derive(Debug, Clone)]
 pub struct RiderData {
-    pub address: Addr<ClientConnection>,
     pub location: Option<Location>,
 }
 
@@ -82,8 +81,9 @@ pub struct ConnectionManager {
 
     // Entities
     pub customer_connections: HashMap<CustomerId, Addr<ClientConnection>>,
-    pub riders: HashMap<RiderId, RiderData>,
     pub customers: HashMap<CustomerId, CustomerData>,
+    pub rider_connections: HashMap<RiderId, Addr<ClientConnection>>,
+    pub riders: HashMap<RiderId, RiderData>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
 
@@ -104,6 +104,7 @@ impl ConnectionManager {
             port,
             configuration,
             logger: Logger::new(Some("[CONNECTION-MANAGER]")),
+            rider_connections: HashMap::new(),
             riders: HashMap::new(),
             customer_connections: HashMap::new(),
             customers: HashMap::new(),
@@ -120,12 +121,12 @@ impl ConnectionManager {
 
     fn process_pending_requests(&mut self) {
         while let Some(pending_request) = self.pending_delivery_requests.pop_front() {
-            if let Some(rider) = self.riders.values().find(|_rider| true) {
+            if let Some(rider_adress) = self.rider_connections.values().find(|_rider| true) {
                 self.logger
                     .debug("Assigned pending delivery request to newly registered rider");
                 match self.customers.get(&pending_request.customer_id) {
                     Some(customer) => {
-                        rider.address.do_send(DeliveryOffer {
+                        rider_adress.do_send(DeliveryOffer {
                             customer_id: pending_request.customer_id,
                             customer_location: customer.location,
                         });
@@ -315,8 +316,8 @@ impl Handler<RegisterRider> for ConnectionManager {
     async fn handle(&mut self, msg: RegisterRider, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Rider with ID {}", msg.id));
+        self.rider_connections.entry(msg.id).or_insert(msg.address);
         self.riders.entry(msg.id).or_insert(RiderData {
-            address: msg.address,
             location: Some(msg.location),
         });
         self.process_pending_requests();
@@ -646,6 +647,7 @@ impl Handler<FindRider> for ConnectionManager {
         let closest = NearbyEntities::closest_riders(
             &msg.restaurant_location,
             &self.riders,
+            &self.rider_connections,
             N_RIDERS_TO_NOTIFY,
         );
 
@@ -710,8 +712,8 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                 } else {
                     // Asignar el rider y confirmar la oferta
                     order_data.rider_id = Some(msg.rider_id);
-                    if let Some(rider) = self.riders.get(&msg.rider_id) {
-                        rider.address.do_send(DeliveryOfferConfirmed {
+                    if let Some(rider_address) = self.rider_connections.get(&msg.rider_id) {
+                        rider_address.do_send(DeliveryOfferConfirmed {
                             customer_id: msg.customer_id,
                             customer_location: order_data.customer_location,
                         });
