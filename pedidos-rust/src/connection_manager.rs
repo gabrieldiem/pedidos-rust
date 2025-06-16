@@ -12,12 +12,7 @@ use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, Wrap
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
-use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
-    DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
-    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
-    SendUpdateCustomerData, SendUpdateRestaurantData,
-};
+use common::protocol::{AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SendUpdateCustomerData};
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
 
