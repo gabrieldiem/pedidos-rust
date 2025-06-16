@@ -2,7 +2,7 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
-use crate::messages::RegisterPeerServer;
+use crate::messages::{RegisterPeerServer, Start};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::{Configuration, SinglePedidosRustInfo};
@@ -31,7 +31,6 @@ pub struct Server {
 
 impl Server {
     pub async fn new(id: u32, logger: Logger) -> Result<Server, Box<dyn std::error::Error>> {
-        let connection_manager = ConnectionManager::create(|_ctx| ConnectionManager::new(id));
         let configuration = Configuration::new()?;
 
         let port_pair = configuration
@@ -49,6 +48,9 @@ impl Server {
             }
         };
 
+        let connection_manager = ConnectionManager::create(|_ctx| {
+            ConnectionManager::new(id, my_port, configuration.clone())
+        });
         let hearbeat_monitor =
             HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
@@ -139,12 +141,14 @@ impl Server {
     fn run_connection_gateway(&self) -> Result<(), Box<dyn std::error::Error>> {
         let logger = Logger::new(Some("[CONN-GATEWAY]"));
         let port_clone = self.port;
+        let id_clone = self.id;
         let connection_manager = self.connection_manager.clone();
         let configuration = self.configuration.clone();
 
         spawn(async move {
             if let Err(e) = ConnectionGateway::run(
                 port_clone,
+                id_clone,
                 logger.clone(),
                 connection_manager,
                 configuration,
@@ -158,12 +162,12 @@ impl Server {
         Ok(())
     }
 
-    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream) {
+    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream, peer_id: u32) {
         self.logger
             .info(&format!("Peer connected: {peer_sockaddr}"));
         let port = peer_sockaddr.port() as u32;
 
-        let new_peer = ServerPeer::create(|ctx| {
+        let server_peer = ServerPeer::create(|ctx| {
             let (read_half, write_half) = split(stream);
 
             ServerPeer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
@@ -180,19 +184,11 @@ impl Server {
                 connection_manager: self.connection_manager.clone(),
             }
         });
-
-        if let Some(SinglePedidosRustInfo { id, .. }) = self
-            .configuration
-            .pedidos_rust
-            .infos
-            .iter()
-            .find(|info| info.ports_for_peers.contains(&port))
-        {
-            self.connection_manager.do_send(RegisterPeerServer {
-                id: *id,
-                address: new_peer,
-            });
-        }
+        
+        self.connection_manager.do_send(RegisterPeerServer {
+            id: peer_id,
+            address: server_peer,
+        });
     }
 
     fn create_client_connection(&self, client_sockaddr: SocketAddr, stream: TcpStream) {
@@ -233,12 +229,14 @@ impl Server {
 
         self.run_connection_gateway()?;
 
+        self.hearbeat_monitor.do_send(Start {});
+
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
-            let (is_peer, _peer_id) =
+            let (is_peer, peer_id) =
                 ConnectionGateway::is_connection_a_peer(&connected_sockaddr, &self.configuration);
 
             if is_peer {
-                self.create_server_peer(connected_sockaddr, stream);
+                self.create_server_peer(connected_sockaddr, stream, peer_id);
             } else {
                 self.create_client_connection(connected_sockaddr, stream);
             }

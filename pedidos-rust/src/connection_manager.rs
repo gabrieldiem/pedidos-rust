@@ -1,28 +1,46 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
-    AuthorizePayment, FindRider, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest,
-    PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterNextPeerServer,
-    RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification,
-    SendRestaurantList, UpdateCustomer,
+    AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterNextPeerServer, RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList, UpdateCustomer
 };
-use crate::nearby_entitys::nearby_restaurants;
+use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
-use common::constants::NO_RESTAURANTS;
+use common::configuration::Configuration;
+use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ElectionCall,
-    ExecutePayment, FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
-    RiderArrivedAtCustomer, UpdateCustomerData,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
+    DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
+    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, UpdateCustomerData
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
 
 type CustomerId = u32;
 type RiderId = u32;
-type RestaurantId = u32;
 type RestaurantName = String;
 
+#[derive(Debug, Clone)]
+pub struct LeaderData {
+    pub id: u32,
+    pub port: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct RiderData {
+    pub address: Addr<ClientConnection>,
+    pub location: Option<Location>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct OrderData {
+    pub rider_id: Option<RiderId>,
+    pub order_price: Option<f64>,
+    pub customer_location: Location,
+    pub customer_id: CustomerId
+}
+
+#[derive(Debug, Clone)]
 pub struct CustomerData {
     pub location: Location,
     pub order_price: Option<f64>,
@@ -38,50 +56,49 @@ impl CustomerData {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, Clone)]
 pub struct RestaurantData {
     pub address: Addr<ClientConnection>,
-    pub id: RestaurantId,
     pub location: Location,
 }
 
 impl RestaurantData {
-    pub fn new(
-        address: Addr<ClientConnection>,
-        id: RestaurantId,
-        location: Location,
-    ) -> RestaurantData {
-        RestaurantData {
-            address,
-            id,
-            location,
-        }
+    pub fn new(address: Addr<ClientConnection>, location: Location) -> RestaurantData {
+        RestaurantData { address, location }
     }
 }
+
+pub type PeerId = u32;
 
 pub struct ConnectionManager {
     pub logger: Logger,
     pub id: u32,
+    pub port: u32,
+    pub configuration: Configuration,
 
     // Entities
-    pub riders: HashMap<RiderId, Addr<ClientConnection>>,
     pub customer_connections: HashMap<CustomerId, Addr<ClientConnection>>,
+    pub riders: HashMap<RiderId, RiderData>,
     pub customers: HashMap<CustomerId, CustomerData>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
 
-    pub orders_in_process: HashMap<RiderId, CustomerId>,
+    pub orders_in_process: HashMap<CustomerId, OrderData>,
     pub pending_delivery_requests: VecDeque<FindRider>,
 
     // Peers
-    pub server_peers: HashMap<u32, Addr<ServerPeer>>,
-    pub leader: Option<u32>,
     pub next_server_peer: Option<Addr<ServerPeer>>,
+    pub server_peers: HashMap<PeerId, Addr<ServerPeer>>,
+    pub leader: Option<LeaderData>,
+    pub election_in_progress: bool,
 }
 
 impl ConnectionManager {
-    pub fn new(id: u32) -> ConnectionManager {
+    pub fn new(id: u32, port: u32, configuration: Configuration) -> ConnectionManager {
         ConnectionManager {
             id,
+            port,
+            configuration,
             logger: Logger::new(Some("[CONNECTION-MANAGER]")),
             riders: HashMap::new(),
             customer_connections: HashMap::new(),
@@ -93,6 +110,7 @@ impl ConnectionManager {
             server_peers: HashMap::new(),
             leader: None,
             next_server_peer: None,
+            election_in_progress: false,
         }
     }
 
@@ -103,7 +121,7 @@ impl ConnectionManager {
                     .debug("Assigned pending delivery request to newly registered rider");
                 match self.customers.get(&pending_request.customer_id) {
                     Some(customer) => {
-                        rider.do_send(DeliveryOffer {
+                        rider.address.do_send(DeliveryOffer {
                             customer_id: pending_request.customer_id,
                             customer_location: customer.location,
                         });
@@ -126,20 +144,103 @@ impl Actor for ConnectionManager {
 }
 
 #[async_handler]
+impl Handler<GetPeers> for ConnectionManager {
+    type Result = Result<HashMap<PeerId, Addr<ServerPeer>>, ()>;
+
+    async fn handle(&mut self, _msg: GetPeers, _ctx: &mut Self::Context) -> Self::Result {
+        Ok(self.server_peers.clone())
+    }
+}
+
+#[async_handler]
+impl Handler<ElectionCoordinatorReceived> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: ElectionCoordinatorReceived,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.election_in_progress = false;
+        let leader_port = msg.leader_port;
+
+        let info = self
+            .configuration
+            .pedidos_rust
+            .infos
+            .iter()
+            .find(|pair| pair.port == leader_port);
+
+        match info {
+            Some(info) => {
+                self.leader = Some(LeaderData {
+                    id: info.id,
+                    port: leader_port,
+                });
+                self.logger.debug(&format!(
+                    "Election coordinator received. New leader is {} with ID {}",
+                    leader_port, info.id
+                ));
+            }
+            None => self
+                .logger
+                .debug(&format!("No info for port {leader_port}")),
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<ElectionCall> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, _msg: ElectionCall, _ctx: &mut Self::Context) -> Self::Result {
+        if self.election_in_progress {
+            return;
+        }
+
+        // Send to all peers with higher ID an ElectionCall message
         for peer_id in self.server_peers.keys() {
             if *peer_id > self.id {
                 match self.server_peers.get(peer_id) {
-                    Some(peer_addr) => peer_addr.do_send(ElectionCall {}),
+                    Some(peer_addr) => {
+                        peer_addr.do_send(ElectionCall {});
+                        self.election_in_progress = true;
+                    }
                     None => {
                         self.logger.warn("No peer found");
                     }
                 };
             }
         }
+
+        // If no message was sent, then I am the highest currently
+        // So I am the leader
+        if !self.election_in_progress {
+            self.leader = Some(LeaderData {
+                id: self.id,
+                port: self.port,
+            });
+
+            for peer_id in self.server_peers.keys() {
+                match self.server_peers.get(peer_id) {
+                    Some(peer_addr) => {
+                        peer_addr.do_send(ElectionCoordinator {});
+                    }
+                    None => {
+                        self.logger.warn("No peer found");
+                    }
+                };
+            }
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<GetLeaderInfo> for ConnectionManager {
+    type Result = Result<Option<LeaderData>, ()>;
+
+    async fn handle(&mut self, _msg: GetLeaderInfo, _ctx: &mut Self::Context) -> Self::Result {
+        Ok(self.leader.clone())
     }
 }
 
@@ -197,7 +298,6 @@ impl Handler<RegisterNextPeerServer> for ConnectionManager {
             }
         }
         self.process_pending_requests();
-        self.logger.info(&format!("{:?}", self.server_peers));
     }
 }
 
@@ -232,7 +332,10 @@ impl Handler<RegisterRider> for ConnectionManager {
     async fn handle(&mut self, msg: RegisterRider, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Rider with ID {}", msg.id));
-        self.riders.entry(msg.id).or_insert(msg.address);
+        self.riders.entry(msg.id).or_insert(RiderData {
+            address: msg.address,
+            location: Some(msg.location),
+        });
         self.process_pending_requests();
     }
 }
@@ -272,7 +375,7 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
         ));
         self.restaurants
             .entry(msg.name)
-            .or_insert(RestaurantData::new(msg.address, msg.id, msg.location));
+            .or_insert(RestaurantData::new(msg.address, msg.location));
         self.process_pending_requests();
     }
 }
@@ -304,7 +407,8 @@ impl Handler<SendRestaurantList> for ConnectionManager {
 
         match self.customers.get(&msg.customer_id) {
             Some(customer) => {
-                let nearby = nearby_restaurants(&customer.location, &self.restaurants);
+                let nearby =
+                    NearbyEntities::nearby_restaurants(&customer.location, &self.restaurants);
 
                 let restaurant_list = if nearby.is_empty() {
                     NO_RESTAURANTS.to_string()
@@ -441,6 +545,22 @@ impl Handler<OrderRequest> for ConnectionManager {
             self.logger
                 .warn("Failed to find customer data when preparing order");
         }
+        self.orders_in_process.insert(
+            msg.customer_id,
+            OrderData {
+                rider_id: None,
+                order_price: Some(msg.order_price),
+                customer_location: match self.customers.get(&msg.customer_id) {
+                    Some(customer) => customer.location,
+                    None => {
+                        self.logger
+                            .warn("Failed to find customer data when preparing order");
+                        return;
+                    }
+                },
+                customer_id: msg.customer_id
+            },
+        );
         if let Some(restaurant) = self.restaurants.get(&msg.restaurant_name) {
             restaurant.address.do_send(OrderToRestaurant {
                 customer_id: msg.customer_id,
@@ -487,9 +607,11 @@ impl Handler<OrderReady> for ConnectionManager {
             customer_adress.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });
-
+            self.logger
+                .debug(&format!("Finding a rider for customer {}", msg.customer_id));
             ctx.address().do_send(FindRider {
                 customer_id: msg.customer_id,
+                restaurant_location: msg.restaurant_location,
             });
         } else {
             self.logger
@@ -500,6 +622,8 @@ impl Handler<OrderReady> for ConnectionManager {
     }
 }
 
+/// TODO: eliminar la entrada de orders_in_process (ademas de la de pending_delivery_requests) para el
+/// customer en todos los casos donde se envia FinishDelivery
 #[async_handler]
 impl Handler<OrderCancelled> for ConnectionManager {
     type Result = ();
@@ -516,32 +640,40 @@ impl Handler<OrderCancelled> for ConnectionManager {
     }
 }
 
+// any rider will do
+// TODO: bug when connecting multiple riders, given that only one is gotten
 #[async_handler]
 impl Handler<FindRider> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: FindRider, _ctx: &mut Self::Context) -> Self::Result {
-        // any rider will do
-        // TODO: bug when connecting multiple riders, given that only one is gotten
-        match self.riders.values().find(|_rider| true) {
-            Some(found_rider) => match self.customers.get(&msg.customer_id) {
-                Some(customer) => {
-                    found_rider.do_send(DeliveryOffer {
-                        customer_id: msg.customer_id,
-                        customer_location: customer.location,
-                    });
-                }
-                None => {
-                    self.logger
-                        .warn("Failed to find customer data when finding rider");
-                }
-            },
+        let customer_loc = match self.customers.get(&msg.customer_id) {
+            Some(customer) => &customer.location,
             None => {
                 self.logger
-                    .warn("No rider found, adding to pending requests");
-                self.pending_delivery_requests.push_back(msg);
+                    .warn("Customer ID not found when trying to find rider");
+                return;
             }
         };
+
+        let closest = NearbyEntities::closest_riders(
+            &msg.restaurant_location,
+            &self.riders,
+            N_RIDERS_TO_NOTIFY,
+        );
+
+        if closest.is_empty() {
+            self.logger
+                .warn("No riders with valid location, adding to pending requests");
+            self.pending_delivery_requests.push_back(msg);
+        } else {
+            for addr in closest {
+                addr.do_send(DeliveryOffer {
+                    customer_id: msg.customer_id,
+                    customer_location: *customer_loc,
+                });
+            }
+        }
     }
 }
 
@@ -559,10 +691,54 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                 let notification_msg =
                     format!("The rider {} will deliver your order", msg.rider_id);
                 customer_adress.do_send(PushNotification { notification_msg });
-                self.orders_in_process.insert(msg.rider_id, msg.customer_id);
+                if let Some(customer_data) = self.customers.get(&msg.customer_id){
+                    self.orders_in_process.insert(
+                        msg.rider_id, 
+                        OrderData { 
+                            rider_id: Some(msg.rider_id), 
+                            order_price: customer_data.order_price, 
+                            customer_location: customer_data.location ,
+                            customer_id: msg.customer_id
+                        });
+                }
+            },
+            None => {self.logger.warn(&format!(
+                        "No customer {} founr",
+                        msg.customer_id
+                    ))}
+        }
+        match self.orders_in_process.get_mut(&msg.customer_id) {
+            Some(order_data) => {
+                if let Some(existing_rider_id) = order_data.rider_id {
+                    // Ya hay un rider asignado, negar la oferta al rider actual
+                    // Es necesario o que no les envíe nada?
+                    // if let Some(rider) = self.riders.get(&msg.rider_id) {
+                    //     rider.address.do_send(DeliveryOfferAlreadyAssigned {
+                    //         customer_id: msg.customer_id,
+                    //     });
+                    self.logger.debug(&format!(
+                        "Rider {} already assigned to customer {}",
+                        existing_rider_id, msg.customer_id
+                    ));
+                } else {
+                    // Asignar el rider y confirmar la oferta
+                    order_data.rider_id = Some(msg.rider_id);
+                    if let Some(rider) = self.riders.get(&msg.rider_id) {
+                        rider.address.do_send(DeliveryOfferConfirmed {
+                            customer_id: msg.customer_id,
+                            customer_location: order_data.customer_location,
+                        });
+                    }
+                    if let Some(customer_address) = self.customer_connections.get(&msg.customer_id) {
+                        let notification_msg =
+                            format!("El rider {} entregará tu pedido", msg.rider_id);
+                        customer_address
+                            .do_send(PushNotification { notification_msg });
+                    }
+                }
             }
             None => {
-                self.logger.warn("Failed finding customer");
+                self.logger.warn("Failed finding customer/order");
             }
         };
     }
@@ -578,7 +754,7 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         match self.orders_in_process.get(&msg.rider_id) {
-            Some(customer_id) => {
+            Some(OrderData {customer_id, ..}) => {
                 match self.customer_connections.get(customer_id) {
                     Some(customer_adress) => {
                         let notification_msg = "The rider is outside! Pick up the order".to_owned();
@@ -595,48 +771,58 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
                 self.logger.warn("Failed finding order in progress");
             }
         }
+        self.logger.debug(&format!(
+            "Rider {} arrived at customer {}",
+            msg.rider_id, msg.customer_id
+        ));
+        if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            customer_adress.do_send(PushNotification {
+                notification_msg: "The rider is outside! Pick up the order".to_string(),
+            });
+        } else {
+            self.logger
+                .warn("Failed to find customer data when notifying rider arrived");
+        }
     }
 }
 
-// TODO: se debe ejecutar el pago antes de enviar FinishDelivery
 #[async_handler]
 impl Handler<DeliveryDone> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
-        let possible_customer_id = self.orders_in_process.get(&msg.rider_id).copied();
+        self.logger.debug("Entering DeliveryDone handler");
+        let Some(&order_data) = self.orders_in_process.get(&msg.customer_id) else {
+            self.logger.warn("Failed finding order in progress");
+            return;
+        };
 
-        match possible_customer_id {
-            Some(customer_id) => {
-                match self.customers.get(&customer_id) {
-                    Some(customer) => match self.orders_in_process.remove(&msg.rider_id) {
-                        Some(_) => {
-                            self.logger.debug("Removed finished order");
-                            let execute_payment_msg = ExecutePayment {
-                                customer_id,
-                                price: customer.order_price.unwrap_or(0.0),
-                            };
-                            if let Some(payment_system) = &self.payment_system {
-                                payment_system.do_send(execute_payment_msg);
-                            } else {
-                                self.logger
-                                    .warn("Failed to find payment system when finishing delivery");
-                            }
-                        }
-                        None => {
-                            self.logger.debug("No order found to be removed");
-                        }
-                    },
+        if self.orders_in_process.remove(&msg.customer_id).is_none() {
+            self.logger
+                .warn("Expected order to exist for removal but it was missing");
+            return;
+        }
 
-                    None => {
-                        self.logger.warn("Failed finding customer");
-                    }
-                };
-            }
+        self.logger.debug("Removed finished order");
 
+        let price = match order_data.order_price {
+            Some(p) => p,
             None => {
-                self.logger.warn("Failed finding order in progress");
+                self.logger
+                    .warn("No se encontró el precio del pedido al ejecutar el pago");
+                return;
             }
+        };
+        let execute_payment_msg = ExecutePayment {
+            customer_id: msg.customer_id,
+            price,
+        };
+
+        if let Some(payment_system) = &self.payment_system {
+            payment_system.do_send(execute_payment_msg);
+        } else {
+            self.logger
+                .warn("Failed to find payment system when finishing delivery");
         }
     }
 }

@@ -1,8 +1,13 @@
-use std::net::SocketAddr;
-
+use crate::connection_manager::LeaderData;
+use crate::connection_manager::PeerId;
 use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
 use common::protocol::Location;
+use std::collections::HashMap;
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct Start {}
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -17,6 +22,7 @@ pub struct RegisterCustomer {
 pub struct RegisterRider {
     pub id: u32,
     pub address: Addr<ClientConnection>,
+    pub location: Location,
 }
 
 #[derive(Message, Debug)]
@@ -102,6 +108,7 @@ pub struct OrderRequest {
 #[rtype(result = "()")]
 pub struct OrderReady {
     pub customer_id: u32,
+    pub restaurant_location: Location,
 }
 
 #[derive(Message, Debug)]
@@ -114,6 +121,7 @@ pub struct OrderCancelled {
 #[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
+    pub restaurant_location: Location,
 }
 
 #[derive(Message, Debug)]
@@ -130,3 +138,22 @@ pub struct UpdateCustomer {
     pub location: Location,
     pub order_price: Option<f64>,
 }
+
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionCallReceived {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ElectionCoordinatorReceived {
+    pub leader_port: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "Result<Option<LeaderData>, ()>")]
+pub struct GetLeaderInfo {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "Result<HashMap<PeerId, Addr<ServerPeer>>, ()>")]
+pub struct GetPeers {}

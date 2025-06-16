@@ -10,9 +10,10 @@ use actix::{
 };
 use actix_async_handler::async_handler;
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ExecutePayment,
-    FinishDelivery, Location, LocationUpdate, Order, OrderInProgress, OrderToRestaurant,
-    PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage, Stop,
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
+    DeliveryOfferConfirmed, ExecutePayment, FinishDelivery, Location, LocationUpdate, Order,
+    OrderInProgress, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
+    SocketMessage, Stop,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -250,6 +251,7 @@ impl Handler<LocationUpdate> for ClientConnection {
             let msg = RegisterRider {
                 id: self.id,
                 address: _ctx.address(),
+                location: msg.new_location,
             };
             self.connection_manager.do_send(msg);
         }
@@ -285,6 +287,23 @@ impl Handler<DeliveryOfferAccepted> for ClientConnection {
 }
 
 #[async_handler]
+impl Handler<DeliveryOfferConfirmed> for ClientConnection {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: DeliveryOfferConfirmed,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let msg = SocketMessage::DeliveryOfferConfirmed(msg.customer_id, msg.customer_location);
+        if let Err(e) = self.send_message(&msg) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<RiderArrivedAtCustomer> for ClientConnection {
     type Result = ();
 
@@ -293,15 +312,6 @@ impl Handler<RiderArrivedAtCustomer> for ClientConnection {
         msg: RiderArrivedAtCustomer,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        self.connection_manager.do_send(msg);
-    }
-}
-
-#[async_handler]
-impl Handler<DeliveryDone> for ClientConnection {
-    type Result = ();
-
-    async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
         self.connection_manager.do_send(msg);
     }
 }
@@ -357,14 +367,13 @@ impl ClientConnection {
                         rider_id: self.id,
                     });
                 }
-                SocketMessage::RiderArrivedAtCustomer => {
-                    self.logger.debug("Rider arrived at customer location");
-                    ctx.address()
-                        .do_send(RiderArrivedAtCustomer { rider_id: self.id });
-                }
-                SocketMessage::DeliveryDone => {
-                    self.logger.debug("Rider finished the delivery");
-                    ctx.address().do_send(DeliveryDone { rider_id: self.id });
+                SocketMessage::DeliveryDone(customer_id) => {
+                    self.logger
+                        .debug(&format!("Rider {} finished the delivery", self.id));
+                    self.connection_manager.do_send(DeliveryDone {
+                        rider_id: self.id,
+                        customer_id,
+                    });
                 }
                 SocketMessage::InformLocation(location, name) => {
                     self.logger.debug("A new restaurant wants to register");
@@ -378,11 +387,12 @@ impl ClientConnection {
                         customer_id: client_id,
                     });
                 }
-                SocketMessage::OrderReady(client_id) => {
+                SocketMessage::OrderReady(client_id, restaurant_location) => {
                     self.logger
                         .debug(&format!("Order ready for client {}", client_id));
                     self.connection_manager.do_send(OrderReady {
                         customer_id: client_id,
+                        restaurant_location,
                     })
                 }
                 SocketMessage::OrderCalcelled(client_id) => {
