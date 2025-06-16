@@ -1,9 +1,10 @@
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{ElectionCallReceived, ElectionCoordinatorReceived};
+use crate::messages::{ElectionCallReceived, ElectionCoordinatorReceived, UpdateCustomerData};
 use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, LivenessProbe, SocketMessage, UpdateCustomerData,
+    ElectionCall, ElectionCoordinator, ElectionOk, LivenessProbe, SendUpdateCustomerData,
+    SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -126,6 +127,26 @@ impl Handler<UpdateCustomerData> for ServerPeer {
     }
 }
 
+#[async_handler]
+impl Handler<SendUpdateCustomerData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdateCustomerData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdateCustomerData(
+            msg.customer_id,
+            msg.location,
+            msg.order_price,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
 impl ServerPeer {
     #[allow(unreachable_patterns)]
     fn dispatch_message(&mut self, line_read: String, ctx: &mut <ServerPeer as Actor>::Context) {
@@ -144,7 +165,9 @@ impl ServerPeer {
                     });
                 }
                 SocketMessage::UpdateCustomerData(customer_id, location, order_price) => {
-                    ctx.address().do_send(UpdateCustomerData {
+                    self.logger
+                        .info(&format!("Updating data for customer {customer_id}"));
+                    self.connection_manager.do_send(UpdateCustomerData {
                         customer_id,
                         location,
                         order_price,

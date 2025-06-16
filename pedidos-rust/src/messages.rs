@@ -133,7 +133,7 @@ pub struct SendNotification {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct UpdateCustomer {
+pub struct UpdateCustomerData {
     pub customer_id: u32,
     pub location: Location,
     pub order_price: Option<f64>,

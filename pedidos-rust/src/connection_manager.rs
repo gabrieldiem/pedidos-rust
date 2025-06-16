@@ -4,7 +4,7 @@ use crate::messages::{
     IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
     PaymentExecuted, RegisterCustomer, RegisterNextPeerServer, RegisterPaymentSystem,
     RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
-    UpdateCustomer,
+    UpdateCustomerData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -16,7 +16,7 @@ use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
     Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
-    UpdateCustomerData,
+    SendUpdateCustomerData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -274,7 +274,7 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
         self.next_server_peer = Some(
             self.server_peers
                 .get(&updated_next_peer_id)
-                .unwrap()
+                .unwrap() // already checked the peer exists before
                 .clone(),
         );
         self.logger.info(&format!(
@@ -359,11 +359,11 @@ impl Handler<RegisterCustomer> for ConnectionManager {
             .entry(msg.id)
             .or_insert(msg.address);
         if let Some(peer) = &self.next_server_peer {
-            peer.do_send(UpdateCustomerData {
+            peer.do_send(SendUpdateCustomerData {
                 customer_id: msg.id,
                 location: msg.location,
                 order_price: None,
-            })
+            });
         }
         self.process_pending_requests();
     }

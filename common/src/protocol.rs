@@ -180,7 +180,7 @@ pub struct ElectionCoordinator {}
 
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
-pub struct UpdateCustomerData {
+pub struct SendUpdateCustomerData {
     pub customer_id: u32,
     pub location: Location,
     pub order_price: Option<f64>,

@@ -2,7 +2,7 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
-use crate::messages::{RegisterPeerServer, Start};
+use crate::messages::{ElectionCoordinatorReceived, RegisterPeerServer, Start};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -224,6 +224,13 @@ impl Server {
             "Listening for connections on {}",
             sockaddr_str.clone()
         ));
+
+        if self.id == 1 {
+            self.connection_manager
+                .do_send(ElectionCoordinatorReceived {
+                    leader_port: self.port,
+                });
+        }
 
         self.connect_server_peers().await?;
 
