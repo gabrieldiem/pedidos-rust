@@ -9,7 +9,12 @@ use actix::{
     StreamHandler, WrapFuture,
 };
 use actix_async_handler::async_handler;
-use common::protocol::{AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, DeliveryOfferConfirmed, ExecutePayment, FinishDelivery, Location, LocationUpdate, LocationUpdateForRider, Order, OrderInProgress, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SocketMessage, Stop};
+use common::protocol::{
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
+    DeliveryOfferConfirmed, ExecutePayment, FinishDelivery, Location, LocationUpdate,
+    LocationUpdateForRider, Order, OrderInProgress, OrderToRestaurant, PushNotification,
+    Restaurants, RiderArrivedAtCustomer, SocketMessage, Stop,
+};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;

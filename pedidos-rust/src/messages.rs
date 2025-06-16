@@ -162,6 +162,13 @@ pub struct UpdateRestaurantData {
 
 #[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
+pub struct UpdateRiderData {
+    pub rider_id: u32,
+    pub location: Option<Location>,
+}
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
 pub struct UpdateOrderInProgressData {
     pub rider_id: Option<u32>,
     pub order_price: Option<f64>,
