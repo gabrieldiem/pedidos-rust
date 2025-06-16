@@ -1,7 +1,6 @@
 use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
-use crate::heartbeat::HeartbeatMonitor;
 use crate::messages::{ElectionCoordinatorReceived, RegisterPeerServer, StartHeartbeat};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
@@ -11,7 +10,7 @@ use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::net::{TcpListener, TcpStream, UdpSocket};
@@ -23,7 +22,6 @@ pub struct Server {
     id: u32,
     logger: Logger,
     configuration: Configuration,
-    heartbeat_monitor: Addr<HeartbeatMonitor>,
     connection_manager: Addr<ConnectionManager>,
     port: u32,
     ports_for_peers: Vec<u32>,
@@ -52,8 +50,6 @@ impl Server {
         let connection_manager = ConnectionManager::create(|_ctx| {
             ConnectionManager::new(id, my_port, configuration.clone())
         });
-        let heartbeat_monitor =
-            HeartbeatMonitor::create(|_ctx| HeartbeatMonitor::new(connection_manager.clone()));
 
         let mut ports_for_peers_in_use: HashMap<u32, bool> = HashMap::new();
         for port in ports_for_peers.clone() {
@@ -64,7 +60,6 @@ impl Server {
             id,
             logger,
             configuration,
-            heartbeat_monitor,
             connection_manager,
             port: my_port,
             ports_for_peers,
@@ -125,13 +120,12 @@ impl Server {
                 }
                 .start();
 
-                ServerPeer {
+                ServerPeer::new(
                     tcp_sender,
-                    logger: Logger::new(Some(&format!("[PEER-{peer_port}]"))),
-                    port: self.port,
+                    self.port,
                     peer_port,
-                    connection_manager: self.connection_manager.clone(),
-                }
+                    self.connection_manager.clone(),
+                )
             });
             // HARDCODEADO PARA PODER HACER PRUEBAS
             self.connection_manager.do_send(RegisterPeerServer {
@@ -147,10 +141,12 @@ impl Server {
         let port_clone = self.port;
         let id_clone = self.id;
         let connection_manager = self.connection_manager.clone();
-        let heartbeat_monitor = self.heartbeat_monitor.clone();
         let configuration = self.configuration.clone();
 
-        let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port_clone as u16);
+        let local_addr: SocketAddr = match format!("{}:{}", DEFAULT_PR_HOST, port_clone).parse() {
+            Ok(addr) => addr,
+            Err(e) => return Err(e.into()),
+        };
 
         let socket = match UdpSocket::bind(local_addr).await {
             Ok(socket) => Arc::new(socket),
@@ -173,7 +169,6 @@ impl Server {
                 id_clone,
                 logger.clone(),
                 connection_manager,
-                heartbeat_monitor,
                 configuration,
                 socket_ref,
             )
@@ -186,10 +181,41 @@ impl Server {
         Ok(socket)
     }
 
-    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream, peer_id: u32) {
+    fn get_cannonical_peer_port(&self, peer_port_from_connection: u32) -> Option<u32> {
+        let mut canonical_peer_port: Option<u32> = None;
+
+        for info in self.configuration.pedidos_rust.infos.clone() {
+            for port_for_peer in info.ports_for_peers {
+                if port_for_peer == peer_port_from_connection {
+                    canonical_peer_port = Some(info.port);
+                }
+            }
+        }
+
+        canonical_peer_port
+    }
+
+    fn create_server_peer(
+        &self,
+        peer_sockaddr: SocketAddr,
+        stream: TcpStream,
+        peer_id: u32,
+        _udp_socket: Arc<UdpSocket>,
+    ) {
         self.logger
             .info(&format!("Peer connected: {peer_sockaddr}"));
-        let peer_port = peer_sockaddr.port() as u32;
+
+        let peer_port_from_connection = peer_sockaddr.port() as u32;
+        let peer_port = match self.get_cannonical_peer_port(peer_port_from_connection) {
+            Some(port) => port,
+            None => {
+                self.logger.error(&format!(
+                    "No cannonical peer port for: {}",
+                    peer_port_from_connection
+                ));
+                return;
+            }
+        };
 
         let server_peer = ServerPeer::create(|ctx| {
             let (read_half, write_half) = split(stream);
@@ -201,18 +227,17 @@ impl Server {
             }
             .start();
 
-            ServerPeer {
+            ServerPeer::new(
                 tcp_sender,
-                logger: Logger::new(Some(&format!("[PEER-{peer_port}]"))),
-                port: self.port,
+                self.port,
                 peer_port,
-                connection_manager: self.connection_manager.clone(),
-            }
+                self.connection_manager.clone(),
+            )
         });
 
         self.connection_manager.do_send(RegisterPeerServer {
             id: peer_id,
-            address: server_peer,
+            address: server_peer.clone(),
         });
     }
 
@@ -241,6 +266,13 @@ impl Server {
         });
     }
 
+    async fn start_heartbeats_of_peers(&self, udp_socket: Arc<UdpSocket>) {
+        let _ = self
+            .connection_manager
+            .send(StartHeartbeat { udp_socket })
+            .await;
+    }
+
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
@@ -254,22 +286,22 @@ impl Server {
 
         let udp_socket = self.run_connection_gateway().await?;
 
-        self.heartbeat_monitor
-            .do_send(StartHeartbeat { udp_socket });
-        
-        self.connection_manager.do_send(ElectionCoordinatorReceived {
-            leader_port: self.port,
-        });
+        self.start_heartbeats_of_peers(udp_socket.clone()).await;
+
+        // self.connection_manager
+        //     .do_send(ElectionCoordinatorReceived { leader_port: 7501 });
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, peer_id) =
                 ConnectionGateway::is_connection_a_peer(&connected_sockaddr, &self.configuration);
 
             if is_peer {
-                self.create_server_peer(connected_sockaddr, stream, peer_id);
+                self.create_server_peer(connected_sockaddr, stream, peer_id, udp_socket.clone());
             } else {
                 self.create_client_connection(connected_sockaddr, stream);
             }
+
+            self.start_heartbeats_of_peers(udp_socket.clone()).await;
         }
 
         Ok(())

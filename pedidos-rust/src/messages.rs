@@ -19,6 +19,12 @@ pub struct StartHeartbeat {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
+pub struct PeerDisconnected {
+    pub peer_id: PeerId,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
 pub struct RegisterCustomer {
     pub id: u32,
     pub address: Addr<ClientConnection>,
@@ -139,12 +145,19 @@ pub struct SendNotification {
     pub recipient_id: u32, // ID of the recipient aka receiver of the notification
 }
 
-#[derive(Message, Debug)]
+#[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct UpdateCustomerData {
     pub customer_id: u32,
     pub location: Location,
     pub order_price: Option<f64>,
+}
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct UpdateRestaurantData {
+    pub restaurant_name: String,
+    pub location: Location,
 }
 
 #[derive(Message, Debug)]
@@ -173,4 +186,6 @@ pub struct LivenessProbe {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct LivenessEcho {}
+pub struct LivenessEcho {
+    pub origin_port: u32,
+}

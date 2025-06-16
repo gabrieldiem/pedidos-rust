@@ -71,7 +71,10 @@ impl Handler<GetRestaurants> for Customer {
 
     async fn handle(&mut self, msg: GetRestaurants, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Getting Restaurants");
-        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(msg.customer_location, msg.new_customer)) {
+        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(
+            msg.customer_location,
+            msg.new_customer,
+        )) {
             self.logger.error(&e.to_string());
         }
     }

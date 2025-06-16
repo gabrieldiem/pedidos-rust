@@ -351,7 +351,10 @@ impl ClientConnection {
                 /// TODO: que a un new customer lo registre, a uno viejo solo le envia los restaurantes
                 SocketMessage::GetRestaurants(customer_location, is_new_customer) => {
                     self.logger.debug("Got request for GetRestaurants");
-                    ctx.address().do_send(SendRestaurants { customer_location, is_new_customer });
+                    ctx.address().do_send(SendRestaurants {
+                        customer_location,
+                        is_new_customer,
+                    });
                 }
                 SocketMessage::Order(order) => {
                     self.logger.debug("Got order request");

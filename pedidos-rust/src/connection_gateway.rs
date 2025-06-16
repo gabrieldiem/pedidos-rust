@@ -1,6 +1,5 @@
 use crate::connection_manager::{ConnectionManager, LeaderData};
-use crate::heartbeat::HeartbeatMonitor;
-use crate::messages::{GetLeaderInfo, IsPeerConnected};
+use crate::messages::{GetLeaderInfo, IsPeerConnected, LivenessEcho};
 use actix::Addr;
 use common::configuration::Configuration;
 use common::protocol::{SocketMessage, UNKNOWN_LEADER};
@@ -132,9 +131,13 @@ impl ConnectionGateway {
     }
 
     async fn process_liveness_echo(
-        heartbeat_monitor: Addr<HeartbeatMonitor>,
+        connection_manager: &Addr<ConnectionManager>,
+        origin_port: u32,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        Ok(())
+        match connection_manager.send(LivenessEcho { origin_port }).await {
+            Ok(_) => Ok(()),
+            Err(e) => Err(Box::new(e)),
+        }
     }
 
     pub async fn run(
@@ -142,7 +145,6 @@ impl ConnectionGateway {
         id: u32,
         logger: Logger,
         connection_manager: Addr<ConnectionManager>,
-        heartbeat_monitor: Addr<HeartbeatMonitor>,
         configuration: Configuration,
         socket: Arc<UdpSocket>,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -172,7 +174,8 @@ impl ConnectionGateway {
                         }
                         SocketMessage::LivenessEcho => {
                             logger.debug("Received liveness echo");
-                            Self::process_liveness_echo(heartbeat_monitor.clone()).await?;
+                            Self::process_liveness_echo(&connection_manager, addr.port() as u32)
+                                .await?;
                         }
                         _ => {
                             logger.warn(&format!("Unrecognized message: {:?}", received_msg));

@@ -1,19 +1,52 @@
-use crate::connection_manager::ConnectionManager;
+use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
-    ElectionCallReceived, ElectionCoordinatorReceived, LivenessProbe, UpdateCustomerData,
+    ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
+    LivenessProbe, PeerDisconnected, StartHeartbeat, UpdateCustomerData, UpdateRestaurantData,
 };
 use actix::{
-    Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, StreamHandler, WrapFuture,
+    Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
+    WrapFuture,
 };
 use actix_async_handler::async_handler;
+use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData, SocketMessage,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData,
+    SendUpdateRestaurantData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
+use std::collections::HashMap;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::UdpSocket;
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+struct BeginLivenessCheck {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+struct BeginLivenessCheckWithDelay {
+    pub delay: u64,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+struct SendLivenessProbes {
+    peers: HashMap<PeerId, Addr<ServerPeer>>,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+struct FinishLivenessCheck {}
+
+pub enum LivenessMarks {
+    AliveMark,
+    DeadMark,
+}
 
 pub struct ServerPeer {
     pub tcp_sender: Addr<TcpSender>,
@@ -21,6 +54,153 @@ pub struct ServerPeer {
     pub peer_port: u32,
     pub port: u32,
     pub connection_manager: Addr<ConnectionManager>,
+    pub udp_socket: Option<Arc<UdpSocket>>,
+    pub beat_count: u64,
+    pub liveness_marks: Vec<LivenessMarks>,
+    pub collecting_liveness_probes: bool,
+}
+
+#[async_handler]
+impl Handler<StartHeartbeat> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
+        self.beat_count += 1;
+        self.logger
+            .info(&format!("Starting Heartbeat for peer {}", self.peer_port));
+        self.udp_socket = Some(msg.udp_socket);
+
+        _ctx.notify_later(
+            BeginLivenessCheck {},
+            Duration::from_secs(Self::HEARTBEAT_DELAY_IN_SECS),
+        );
+    }
+}
+
+#[async_handler]
+impl Handler<BeginLivenessCheck> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: BeginLivenessCheck, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger
+            .update_prefix(&format!("[PEER-{} B-{}]", self.peer_port, self.beat_count));
+
+        let res_fut = self.connection_manager.send(GetPeers {}).await;
+        if let Ok(Ok(peers)) = res_fut {
+            _ctx.address().do_send(SendLivenessProbes { peers })
+        };
+    }
+}
+
+impl Handler<SendLivenessProbes> for ServerPeer {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(&mut self, msg: SendLivenessProbes, _ctx: &mut Self::Context) -> Self::Result {
+        if self.collecting_liveness_probes {
+            self.liveness_marks.push(LivenessMarks::DeadMark);
+        }
+
+        let my_address = _ctx.address().clone();
+        if self.liveness_marks.len() as u64 == Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
+            my_address.do_send(FinishLivenessCheck {});
+        }
+
+        let peers = msg.peers;
+        let logger = self.logger.clone();
+        let udp_socket = self.udp_socket.clone();
+        let connection_manager = self.connection_manager.clone();
+
+        self.collecting_liveness_probes = true;
+
+        Box::pin(
+            async move {
+                let res_fut = connection_manager.send(GetLeaderInfo {}).await;
+
+                if let Ok(Ok(leader_data)) = res_fut {
+                    match leader_data {
+                        Some(leader_data) => {
+                            if let Some(udp_socket) = udp_socket {
+                                let result = Self::send_liveness_probe(
+                                    &leader_data,
+                                    &peers,
+                                    udp_socket,
+                                    &logger,
+                                    &connection_manager,
+                                )
+                                .await;
+                                if result.is_err() {
+                                    logger.warn("Dead detected");
+                                }
+                            }
+
+                            my_address.do_send(BeginLivenessCheckWithDelay {
+                                delay: Self::HEARTBEAT_DELAY_IN_SECS,
+                            })
+                        }
+                        None => {
+                            logger.info(
+                                "No leader detected. Calling elections and delaying liveness check",
+                            );
+                            connection_manager.do_send(ElectionCall {});
+                            my_address.do_send(BeginLivenessCheckWithDelay {
+                                delay: Self::HEARTBEAT_LONG_DELAY_IN_SECS,
+                            })
+                        }
+                    }
+                };
+            }
+            .into_actor(self),
+        )
+    }
+}
+
+#[async_handler]
+impl Handler<LivenessEcho> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: LivenessEcho, _ctx: &mut Self::Context) -> Self::Result {
+        self.collecting_liveness_probes = false;
+        self.liveness_marks.push(LivenessMarks::AliveMark);
+
+        let my_address = _ctx.address().clone();
+        if self.liveness_marks.len() as u64 == Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
+            my_address.do_send(FinishLivenessCheck {});
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<BeginLivenessCheckWithDelay> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: BeginLivenessCheckWithDelay,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.beat_count += 1;
+        let delay = msg.delay;
+
+        _ctx.notify_later(BeginLivenessCheck {}, Duration::from_secs(delay));
+    }
+}
+
+#[async_handler]
+impl Handler<FinishLivenessCheck> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: FinishLivenessCheck,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.beat_count += 1;
+
+        _ctx.notify_later(
+            BeginLivenessCheck {},
+            Duration::from_secs(Self::HEARTBEAT_DELAY_IN_SECS),
+        );
+    }
 }
 
 #[async_handler]
@@ -115,7 +295,7 @@ impl Handler<LivenessProbe> for ServerPeer {
     type Result = ResponseActFuture<Self, ()>;
 
     fn handle(&mut self, msg: LivenessProbe, _ctx: &mut Self::Context) -> Self::Result {
-        let port = self.port as u16;
+        let _port = self.port as u16;
         let peer_port = self.peer_port as u16;
         let logger = self.logger.clone();
         let socket = msg.udp_socket.clone();
@@ -130,7 +310,16 @@ impl Handler<LivenessProbe> for ServerPeer {
                     }
                 };
 
-                let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), peer_port);
+                let server_addr: SocketAddr =
+                    match format!("{}:{}", DEFAULT_PR_HOST, peer_port).parse() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            logger.error(&e.to_string());
+                            return;
+                        }
+                    };
+
+                logger.info(&format!("WILL PROBE: {}", server_addr));
 
                 let res = socket.send_to(msg_to_send.as_bytes(), server_addr).await;
                 if let Err(e) = res {
@@ -147,7 +336,7 @@ impl Handler<UpdateCustomerData> for ServerPeer {
     type Result = ();
 
     async fn handle(&mut self, msg: UpdateCustomerData, _ctx: &mut Self::Context) -> Self::Result {
-        self.connection_manager.do_send(msg)
+        self.connection_manager.do_send(msg);
     }
 }
 
@@ -171,7 +360,49 @@ impl Handler<SendUpdateCustomerData> for ServerPeer {
     }
 }
 
+#[async_handler]
+impl Handler<SendUpdateRestaurantData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdateRestaurantData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdateRestaurantData(
+            msg.restaurant_name,
+            msg.location,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
 impl ServerPeer {
+    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 12;
+    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 20;
+    pub const MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD: u64 = 8;
+
+    pub fn new(
+        tcp_sender: Addr<TcpSender>,
+        port: u32,
+        peer_port: u32,
+        connection_manager: Addr<ConnectionManager>,
+    ) -> ServerPeer {
+        ServerPeer {
+            tcp_sender,
+            logger: Logger::new(Some(&format!("[PEER-{peer_port}]"))),
+            port,
+            peer_port,
+            connection_manager,
+            udp_socket: None,
+            beat_count: 0,
+            liveness_marks: Vec::new(),
+            collecting_liveness_probes: false,
+        }
+    }
+
     #[allow(unreachable_patterns)]
     fn dispatch_message(&mut self, line_read: String, ctx: &mut <ServerPeer as Actor>::Context) {
         let parsed_line = serde_json::from_str(&line_read);
@@ -197,6 +428,14 @@ impl ServerPeer {
                         order_price,
                     })
                 }
+                SocketMessage::UpdateRestaurantData(restaurant_name, location) => {
+                    self.logger
+                        .info(&format!("Updating data for restaurant {restaurant_name}"));
+                    self.connection_manager.do_send(UpdateRestaurantData {
+                        restaurant_name,
+                        location,
+                    })
+                }
                 _ => {
                     self.logger
                         .warn(&format!("Unrecognized message: {:?}", message));
@@ -209,6 +448,41 @@ impl ServerPeer {
                 ));
             }
         }
+    }
+
+    async fn report_status_of_peers(
+        connection_manager: &Addr<ConnectionManager>,
+        liveness_marks: HashMap<PeerId, bool>,
+    ) {
+        for peer_id in liveness_marks.keys() {
+            match liveness_marks.get(peer_id) {
+                Some(true) => {
+                    connection_manager.do_send(PeerDisconnected { peer_id: *peer_id });
+                }
+                Some(false) => {}
+                None => {}
+            }
+        }
+    }
+
+    async fn send_liveness_probe(
+        leader_data: &LeaderData,
+        peers: &HashMap<PeerId, Addr<ServerPeer>>,
+        udp_socket: Arc<UdpSocket>,
+        logger: &Logger,
+        connection_manager: &Addr<ConnectionManager>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let leader_addr = match peers.get(&leader_data.id) {
+            Some(addr) => addr,
+            None => {
+                let msg = &format!("No peer address found for leader id {}", leader_data.id);
+                logger.warn(msg);
+                return Err(msg.to_string().into());
+            }
+        };
+
+        let _ = leader_addr.send(LivenessProbe { udp_socket }).await;
+        Ok(())
     }
 
     fn serialize_message(
@@ -229,7 +503,7 @@ impl ServerPeer {
         let msg_to_send = match Self::serialize_message(socket_message) {
             Ok(ok_result) => ok_result,
             Err(e) => {
-                return Err(format!("Failed to serialize message: {}", e).into());
+                return Err(format!("Failed to serialize message: {}", e));
             }
         };
 
