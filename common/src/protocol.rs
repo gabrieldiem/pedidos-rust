@@ -88,6 +88,13 @@ pub struct LocationUpdate {
     pub new_location: Location,
 }
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct LocationUpdateForRider {
+    pub new_location: Location,
+    pub rider_id: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Location {
     pub x: u16,
@@ -194,6 +201,40 @@ pub struct SendUpdateRestaurantData {
     pub location: Location,
 }
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendUpdateRiderData {
+    pub rider_id: u32,
+    pub location: Option<Location>,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendUpdateOrderInProgressData {
+    pub customer_id: u32,
+    pub customer_location: Location,
+    pub order_price: Option<f64>,
+    pub rider_id: Option<u32>,
+}
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct SendRemoveOrderInProgressData {
+    pub customer_id: u32,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendPushPendingDeliveryRequest {
+    pub customer_id: u32,
+    pub restaurant_location: Location,
+    pub to_front: bool,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendPopPendingDeliveryRequest {}
+
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -230,6 +271,11 @@ pub enum SocketMessage {
     ElectionCoordinator,
     UpdateCustomerData(u32, Location, Option<f64>),
     UpdateRestaurantData(String, Location),
+    UpdateRiderData(u32, Option<Location>),
+    UpdateOrderInProgressData(u32, Location, Option<f64>, Option<u32>),
+    RemoveOrderInProgressData(u32),
+    PushPendingDeliveryRequest(u32, Location, bool),
+    PopPendingDeliveryRequest,
     LivenessProbe,
     LivenessEcho,
 }

@@ -1,7 +1,8 @@
 use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
-    LivenessProbe, PeerDisconnected, StartHeartbeat, UpdateCustomerData, UpdateRestaurantData,
+    LivenessProbe, PeerDisconnected, PushPendingDeliveryRequest, RemoveOrderInProgressData,
+    StartHeartbeat, UpdateCustomerData, UpdateRestaurantData, UpdateRiderData,
 };
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
@@ -10,8 +11,9 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData,
-    SendUpdateRestaurantData, SocketMessage,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendPopPendingDeliveryRequest,
+    SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
+    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -364,15 +366,6 @@ impl Handler<LivenessProbe> for ServerPeer {
 }
 
 #[async_handler]
-impl Handler<UpdateCustomerData> for ServerPeer {
-    type Result = ();
-
-    async fn handle(&mut self, msg: UpdateCustomerData, _ctx: &mut Self::Context) -> Self::Result {
-        self.connection_manager.do_send(msg);
-    }
-}
-
-#[async_handler]
 impl Handler<SendUpdateCustomerData> for ServerPeer {
     type Result = ();
 
@@ -405,6 +398,95 @@ impl Handler<SendUpdateRestaurantData> for ServerPeer {
             msg.restaurant_name,
             msg.location,
         )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendUpdateRiderData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, msg: SendUpdateRiderData, _ctx: &mut Self::Context) -> Self::Result {
+        if let Err(e) =
+            self.send_message(&SocketMessage::UpdateRiderData(msg.rider_id, msg.location))
+        {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendUpdateOrderInProgressData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdateOrderInProgressData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdateOrderInProgressData(
+            msg.customer_id,
+            msg.customer_location,
+            msg.order_price,
+            msg.rider_id,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendRemoveOrderInProgressData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendRemoveOrderInProgressData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) =
+            self.send_message(&SocketMessage::RemoveOrderInProgressData(msg.customer_id))
+        {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendPushPendingDeliveryRequest> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendPushPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::PushPendingDeliveryRequest(
+            msg.customer_id,
+            msg.restaurant_location,
+            msg.to_front,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendPopPendingDeliveryRequest> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: SendPopPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::PopPendingDeliveryRequest) {
             self.logger.error(&e.to_string());
             return;
         }
@@ -476,6 +558,33 @@ impl ServerPeer {
                     self.connection_manager.do_send(UpdateRestaurantData {
                         restaurant_name,
                         location,
+                    })
+                }
+                SocketMessage::UpdateRiderData(rider_id, location) => {
+                    self.logger
+                        .info(&format!("Updating data for rider {rider_id}"));
+                    self.connection_manager
+                        .do_send(UpdateRiderData { rider_id, location })
+                }
+                SocketMessage::RemoveOrderInProgressData(customer_id) => {
+                    self.logger.info(&format!(
+                        "Removing data for order from customer {customer_id}"
+                    ));
+                    self.connection_manager
+                        .do_send(RemoveOrderInProgressData { customer_id })
+                }
+                SocketMessage::PushPendingDeliveryRequest(
+                    customer_id,
+                    restaurant_location,
+                    to_front,
+                ) => {
+                    self.logger.info(&format!(
+                        "Removing data for order from customer {customer_id}"
+                    ));
+                    self.connection_manager.do_send(PushPendingDeliveryRequest {
+                        customer_id,
+                        restaurant_location,
+                        to_front,
                     })
                 }
                 _ => {
