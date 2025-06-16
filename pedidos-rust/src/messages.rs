@@ -131,7 +131,7 @@ pub struct OrderCancelled {
     pub customer_id: u32,
 }
 
-#[derive(Message, Debug)]
+#[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct FindRider {
     pub customer_id: u32,
@@ -181,6 +181,18 @@ pub struct UpdateOrderInProgressData {
 pub struct RemoveOrderInProgressData {
     pub customer_id: u32,
 }
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct PushPendingDeliveryRequest {
+    pub customer_id: u32,
+    pub restaurant_location: Location,
+    pub to_front: bool,
+}
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct PopPendingDeliveryRequest {}
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]

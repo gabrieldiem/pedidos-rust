@@ -1,8 +1,8 @@
 use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
-    LivenessProbe, PeerDisconnected, RemoveOrderInProgressData, StartHeartbeat, UpdateCustomerData,
-    UpdateRestaurantData, UpdateRiderData,
+    LivenessProbe, PeerDisconnected, PushPendingDeliveryRequest, RemoveOrderInProgressData,
+    StartHeartbeat, UpdateCustomerData, UpdateRestaurantData, UpdateRiderData,
 };
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
@@ -11,9 +11,9 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SendRemoveOrderInProgressData,
-    SendUpdateCustomerData, SendUpdateOrderInProgressData, SendUpdateRestaurantData,
-    SendUpdateRiderData, SocketMessage,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendPopPendingDeliveryRequest,
+    SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
+    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -425,6 +425,42 @@ impl Handler<SendRemoveOrderInProgressData> for ServerPeer {
     }
 }
 
+#[async_handler]
+impl Handler<SendPushPendingDeliveryRequest> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendPushPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::PushPendingDeliveryRequest(
+            msg.customer_id,
+            msg.restaurant_location,
+            msg.to_front,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendPopPendingDeliveryRequest> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: SendPopPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::PopPendingDeliveryRequest) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
 impl ServerPeer {
     pub const HEARTBEAT_DELAY_IN_SECS: u64 = 12;
     pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 20;
@@ -494,6 +530,20 @@ impl ServerPeer {
                     ));
                     self.connection_manager
                         .do_send(RemoveOrderInProgressData { customer_id })
+                }
+                SocketMessage::PushPendingDeliveryRequest(
+                    customer_id,
+                    restaurant_location,
+                    to_front,
+                ) => {
+                    self.logger.info(&format!(
+                        "Removing data for order from customer {customer_id}"
+                    ));
+                    self.connection_manager.do_send(PushPendingDeliveryRequest {
+                        customer_id,
+                        restaurant_location,
+                        to_front,
+                    })
                 }
                 _ => {
                     self.logger

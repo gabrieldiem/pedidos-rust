@@ -223,6 +223,18 @@ pub struct SendRemoveOrderInProgressData {
     pub customer_id: u32,
 }
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendPushPendingDeliveryRequest {
+    pub customer_id: u32,
+    pub restaurant_location: Location,
+    pub to_front: bool,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendPopPendingDeliveryRequest {}
+
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -262,6 +274,8 @@ pub enum SocketMessage {
     UpdateRiderData(u32, Option<Location>),
     UpdateOrderInProgressData(u32, Location, Option<f64>, Option<u32>),
     RemoveOrderInProgressData(u32),
+    PushPendingDeliveryRequest(u32, Location, bool),
+    PopPendingDeliveryRequest,
     LivenessProbe,
     LivenessEcho,
 }
