@@ -56,6 +56,12 @@ pub struct RegisterPeerServer {
 }
 
 #[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct RegisterNextPeerServer {
+    pub id: u32,
+}
+
+#[derive(Message, Debug)]
 #[rtype(result = "Result<bool, ()>")]
 pub struct IsPeerConnected {
     pub id: u32,
@@ -131,6 +137,14 @@ pub struct FindRider {
 pub struct SendNotification {
     pub message: String,
     pub recipient_id: u32, // ID of the recipient aka receiver of the notification
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct UpdateCustomer {
+    pub customer_id: u32,
+    pub location: Location,
+    pub order_price: Option<f64>,
 }
 
 #[derive(Message, Debug)]

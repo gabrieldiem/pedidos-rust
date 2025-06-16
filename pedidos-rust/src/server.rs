@@ -100,7 +100,6 @@ impl Server {
             if peer_id == self.id {
                 continue;
             }
-
             let port_for_peer = self.choose_port_for_peer()?;
             let tcp_connector = TcpConnector::new(port_for_peer, vec![peer_port]);
             let stream = match tcp_connector.connect().await {
@@ -125,8 +124,6 @@ impl Server {
                     write_stream: Some(write_half),
                 }
                 .start();
-
-                self.logger.debug("Created ServerPeer");
 
                 ServerPeer {
                     tcp_sender,
@@ -203,8 +200,6 @@ impl Server {
                 write_stream: Some(write_half),
             }
             .start();
-
-            self.logger.debug("Created ServerPeer");
 
             ServerPeer {
                 tcp_sender,
