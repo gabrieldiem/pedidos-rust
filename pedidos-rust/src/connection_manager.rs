@@ -2,10 +2,11 @@ use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
     IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterPaymentSystem,
-    RegisterPeerServer, RegisterRestaurant, RegisterRider, RemoveOrderInProgressData,
-    SendNotification, SendRestaurantList, StartHeartbeat, UpdateCustomerData,
-    UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData,
+    PaymentDenied, PaymentExecuted, PeerDisconnected, PopPendingDeliveryRequest,
+    PushPendingDeliveryRequest, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
+    RegisterRestaurant, RegisterRider, RemoveOrderInProgressData, SendNotification,
+    SendRestaurantList, StartHeartbeat, UpdateCustomerData, UpdateOrderInProgressData,
+    UpdateRestaurantData, UpdateRiderData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -17,10 +18,12 @@ use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
     Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants,
-    RiderArrivedAtCustomer, SendRemoveOrderInProgressData, SendUpdateCustomerData,
-    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData,
+    RiderArrivedAtCustomer, SendPopPendingDeliveryRequest, SendPushPendingDeliveryRequest,
+    SendRemoveOrderInProgressData, SendUpdateCustomerData, SendUpdateOrderInProgressData,
+    SendUpdateRestaurantData, SendUpdateRiderData,
 };
 use common::utils::logger::Logger;
+use futures::stream::TryChunksError;
 use std::collections::{HashMap, VecDeque};
 
 type CustomerId = u32;
@@ -125,6 +128,9 @@ impl ConnectionManager {
 
     fn process_pending_requests(&mut self) {
         while let Some(pending_request) = self.pending_delivery_requests.pop_front() {
+            if let Some((_, peer)) = &self.next_server_peer {
+                peer.do_send(SendPopPendingDeliveryRequest {});
+            }
             if let Some(rider_adress) = self.rider_connections.values().find(|_rider| true) {
                 self.logger
                     .debug("Assigned pending delivery request to newly registered rider");
@@ -141,7 +147,15 @@ impl ConnectionManager {
                     }
                 }
             } else {
-                self.pending_delivery_requests.push_front(pending_request);
+                self.pending_delivery_requests
+                    .push_front(pending_request.clone());
+                if let Some((_, peer)) = &self.next_server_peer {
+                    peer.do_send(SendPushPendingDeliveryRequest {
+                        customer_id: pending_request.customer_id,
+                        restaurant_location: pending_request.restaurant_location,
+                        to_front: true,
+                    });
+                }
                 break;
             }
         }
@@ -752,7 +766,14 @@ impl Handler<FindRider> for ConnectionManager {
         if closest.is_empty() {
             self.logger
                 .warn("No riders with valid location, adding to pending requests");
-            self.pending_delivery_requests.push_back(msg);
+            self.pending_delivery_requests.push_back(msg.clone());
+            if let Some((_, peer)) = &self.next_server_peer {
+                peer.do_send(SendPushPendingDeliveryRequest {
+                    customer_id: msg.customer_id,
+                    restaurant_location: msg.restaurant_location,
+                    to_front: false,
+                });
+            }
         } else {
             for addr in closest {
                 addr.do_send(DeliveryOffer {
@@ -1071,6 +1092,40 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
     }
 }
 
+impl Handler<UpdateRiderData> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: UpdateRiderData, _ctx: &mut Self::Context) -> Self::Result {
+        self.riders
+            .entry(msg.rider_id)
+            .and_modify(|data| {
+                data.location = msg.location;
+            })
+            .or_insert(RiderData {
+                location: msg.location,
+            });
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendUpdateRiderData {
+                        rider_id: msg.rider_id,
+                        location: msg.location,
+                    });
+                }
+            }
+        };
+
+        self.logger.info(&format!(
+            "Updated rider data {} to location {:?}",
+            msg.rider_id, msg.location
+        ));
+
+        self.process_pending_requests();
+    }
+}
+
 impl Handler<UpdateOrderInProgressData> for ConnectionManager {
     type Result = ();
 
@@ -1139,35 +1194,64 @@ impl Handler<RemoveOrderInProgressData> for ConnectionManager {
     }
 }
 
-impl Handler<UpdateRiderData> for ConnectionManager {
+impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
     type Result = ();
 
-    fn handle(&mut self, msg: UpdateRiderData, _ctx: &mut Self::Context) -> Self::Result {
-        self.riders
-            .entry(msg.rider_id)
-            .and_modify(|data| {
-                data.location = msg.location;
-            })
-            .or_insert(RiderData {
-                location: msg.location,
+    fn handle(
+        &mut self,
+        msg: PushPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if msg.to_front {
+            self.pending_delivery_requests.push_front(FindRider {
+                customer_id: msg.customer_id,
+                restaurant_location: msg.restaurant_location,
             });
+        } else {
+            self.pending_delivery_requests.push_back(FindRider {
+                customer_id: msg.customer_id,
+                restaurant_location: msg.restaurant_location,
+            });
+        }
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
                 if !(leader_id == *next_peer_id) {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
-                    peer.do_send(SendUpdateRiderData {
-                        rider_id: msg.rider_id,
-                        location: msg.location,
+                    peer.do_send(SendPushPendingDeliveryRequest {
+                        customer_id: msg.customer_id,
+                        restaurant_location: msg.restaurant_location,
+                        to_front: msg.to_front,
                     });
                 }
             }
         };
 
         self.logger.info(&format!(
-            "Updated rider data {} to location {:?}",
-            msg.rider_id, msg.location
+            "Pushed new pending order for customer {} and restaurant location {:?}",
+            msg.customer_id, msg.restaurant_location
         ));
+
+        self.process_pending_requests();
+    }
+}
+
+impl Handler<PopPendingDeliveryRequest> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: PopPendingDeliveryRequest, _ctx: &mut Self::Context) -> Self::Result {
+        let popped = self.pending_delivery_requests.pop_front();
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendPopPendingDeliveryRequest {});
+                }
+            }
+        };
+
+        self.logger.debug(&format!("Popped request {:?}", popped));
 
         self.process_pending_requests();
     }
