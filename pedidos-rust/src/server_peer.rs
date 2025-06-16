@@ -15,7 +15,7 @@ use common::protocol::{
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
-use common::utils::logger::Logger;
+use common::utils::logger::{LogLevel, Logger};
 use std::collections::HashMap;
 use std::io;
 use std::net::SocketAddr;
@@ -51,6 +51,7 @@ pub enum LivenessMarks {
 pub struct ServerPeer {
     pub tcp_sender: Addr<TcpSender>,
     pub logger: Logger,
+    pub logger_for_heartbeat: Logger,
     pub peer_port: u32,
     pub port: u32,
     pub connection_manager: Addr<ConnectionManager>,
@@ -66,14 +67,11 @@ impl Handler<StartHeartbeat> for ServerPeer {
 
     async fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
         self.beat_count += 1;
-        self.logger
+        self.logger_for_heartbeat
             .info(&format!("Starting Heartbeat for peer {}", self.peer_port));
         self.udp_socket = Some(msg.udp_socket);
 
-        _ctx.notify_later(
-            BeginLivenessCheck {},
-            Duration::from_secs(Self::HEARTBEAT_DELAY_IN_SECS),
-        );
+        _ctx.address().do_send(BeginLivenessCheck {});
     }
 }
 
@@ -82,7 +80,7 @@ impl Handler<BeginLivenessCheck> for ServerPeer {
     type Result = ();
 
     async fn handle(&mut self, _msg: BeginLivenessCheck, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger
+        self.logger_for_heartbeat
             .update_prefix(&format!("[PEER-{} B-{}]", self.peer_port, self.beat_count));
 
         let res_fut = self.connection_manager.send(GetPeers {}).await;
@@ -106,7 +104,7 @@ impl Handler<SendLivenessProbes> for ServerPeer {
         }
 
         let peers = msg.peers;
-        let logger = self.logger.clone();
+        let logger = self.logger_for_heartbeat.clone();
         let udp_socket = self.udp_socket.clone();
         let connection_manager = self.connection_manager.clone();
 
@@ -297,7 +295,7 @@ impl Handler<LivenessProbe> for ServerPeer {
     fn handle(&mut self, msg: LivenessProbe, _ctx: &mut Self::Context) -> Self::Result {
         let _port = self.port as u16;
         let peer_port = self.peer_port as u16;
-        let logger = self.logger.clone();
+        let logger = self.logger_for_heartbeat.clone();
         let socket = msg.udp_socket.clone();
 
         Box::pin(
@@ -319,7 +317,7 @@ impl Handler<LivenessProbe> for ServerPeer {
                         }
                     };
 
-                logger.info(&format!("WILL PROBE: {}", server_addr));
+                logger.debug(&format!("Will probe {}", server_addr));
 
                 let res = socket.send_to(msg_to_send.as_bytes(), server_addr).await;
                 if let Err(e) = res {
@@ -380,19 +378,25 @@ impl Handler<SendUpdateRestaurantData> for ServerPeer {
 }
 
 impl ServerPeer {
-    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 12;
-    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 20;
-    pub const MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD: u64 = 8;
+    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 2;
+    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 4;
+    pub const MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD: u64 = 2;
 
     pub fn new(
         tcp_sender: Addr<TcpSender>,
         port: u32,
         peer_port: u32,
         connection_manager: Addr<ConnectionManager>,
+        heart_beat_log_level: LogLevel,
     ) -> ServerPeer {
+        let logger_prefix = &format!("[PEER-{peer_port}]");
+        let logger = Logger::new(Some(logger_prefix));
+        let logger_for_heartbeat = Logger::with_level(Some(logger_prefix), heart_beat_log_level);
+
         ServerPeer {
             tcp_sender,
-            logger: Logger::new(Some(&format!("[PEER-{peer_port}]"))),
+            logger,
+            logger_for_heartbeat,
             port,
             peer_port,
             connection_manager,

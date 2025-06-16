@@ -144,6 +144,7 @@ impl ConnectionGateway {
         port: u32,
         id: u32,
         logger: Logger,
+        logger_for_heart_beat: Logger,
         connection_manager: Addr<ConnectionManager>,
         configuration: Configuration,
         socket: Arc<UdpSocket>,
@@ -169,11 +170,11 @@ impl ConnectionGateway {
                             .await?;
                         }
                         SocketMessage::LivenessProbe => {
-                            logger.debug("Received liveness probe");
+                            logger_for_heart_beat.debug("Received liveness probe");
                             Self::process_liveness_probe(&socket, addr).await?;
                         }
                         SocketMessage::LivenessEcho => {
-                            logger.debug("Received liveness echo");
+                            logger_for_heart_beat.debug("Received liveness echo");
                             Self::process_liveness_echo(&connection_manager, addr.port() as u32)
                                 .await?;
                         }
