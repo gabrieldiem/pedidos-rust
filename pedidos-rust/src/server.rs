@@ -2,7 +2,7 @@ use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
 use crate::heartbeat::HeartbeatMonitor;
-use crate::messages::{RegisterPeerServer, StartHeartbeat};
+use crate::messages::{ElectionCoordinatorReceived, RegisterPeerServer, StartHeartbeat};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -256,6 +256,10 @@ impl Server {
 
         self.heartbeat_monitor
             .do_send(StartHeartbeat { udp_socket });
+        
+        self.connection_manager.do_send(ElectionCoordinatorReceived {
+            leader_port: self.port,
+        });
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, peer_id) =

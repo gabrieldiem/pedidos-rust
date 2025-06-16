@@ -464,7 +464,14 @@ impl Handler<AuthorizePayment> for ConnectionManager {
         } else {
             self.logger
                 .warn("Failed to find payment system when authorizing payment");
-            // TODO: FinishDelivery al customer con el mensaje de que no anda el sistema de pago y lo vuelva a intentar mas tarde
+            if let Some(customer_address) = self.customer_connections.get(&msg.customer_id) {
+                customer_address.do_send(FinishDelivery {
+                    reason: "Payment system is not available, please try again later.".to_string(),
+                });
+            } else {
+                self.logger
+                    .warn("Failed to find customer data when authorizing payment");
+            }
         }
         self.process_pending_requests();
     }
@@ -627,16 +634,15 @@ impl Handler<OrderReady> for ConnectionManager {
     }
 }
 
-/// TODO: eliminar la entrada de orders_in_process (ademas de la de pending_delivery_requests) para el
-/// customer en todos los casos donde se envia FinishDelivery
 #[async_handler]
 impl Handler<OrderCancelled> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: OrderCancelled, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            self.orders_in_process.remove(&msg.customer_id);
             customer_adress.do_send(FinishDelivery {
-                reason: "Delivery cancelled due to lack of stock".to_string(),
+                reason: "Order cancelled by the restaurant due to lack of stock".to_string(),
             });
         } else {
             self.logger
@@ -645,8 +651,6 @@ impl Handler<OrderCancelled> for ConnectionManager {
     }
 }
 
-// any rider will do
-// TODO: bug when connecting multiple riders, given that only one is gotten
 #[async_handler]
 impl Handler<FindRider> for ConnectionManager {
     type Result = ();
@@ -843,6 +847,7 @@ impl Handler<PaymentExecuted> for ConnectionManager {
         ));
 
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            self.orders_in_process.remove(&msg.customer_id);
             let reason_msg = format!("Payment successfully executed for order of {}.", msg.amount,);
             customer_adress.do_send(FinishDelivery {
                 reason: reason_msg.clone(),
