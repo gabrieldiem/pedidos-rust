@@ -11,8 +11,9 @@ use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
-use rand::Rng;
+use rand::{rng, thread_rng, Rng};
 use std::io;
+use rand::seq::IndexedRandom;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio_stream::wrappers::LinesStream;
 
@@ -85,7 +86,9 @@ impl Handler<ChooseRestaurant> for Customer {
 
     async fn handle(&mut self, msg: ChooseRestaurant, _ctx: &mut Self::Context) -> Self::Result {
         if msg.restaurants.trim() == NO_RESTAURANTS {
-            self.logger.info(&msg.restaurants);
+            _ctx.address().do_send(FinishDelivery {
+                reason: "No hay restaurantes disponibles en el momento".to_string(),
+            });
             return;
         }
 
@@ -102,7 +105,7 @@ impl Handler<ChooseRestaurant> for Customer {
             return;
         }
 
-        let chosen_restaurant = &restaurants[0];
+        let chosen_restaurant = restaurants.choose(&mut rng()).unwrap();
 
         let raw_price: f64 = rand::rng().random_range(MIN_ORDER_PRICE..=MAX_ORDER_PRICE);
         let order_price = (raw_price * 100.0).round() / 100.0;
@@ -117,7 +120,7 @@ impl Handler<Order> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: Order, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.debug(&format!(
+        self.logger.info(&format!(
             "I will order {} from {}",
             msg.order.amount, msg.order.restaurant
         ));

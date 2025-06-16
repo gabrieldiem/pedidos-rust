@@ -88,6 +88,13 @@ pub struct LocationUpdate {
     pub new_location: Location,
 }
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct LocationUpdateForRider {
+    pub new_location: Location,
+    pub rider_id: u32,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub struct Location {
     pub x: u16,
