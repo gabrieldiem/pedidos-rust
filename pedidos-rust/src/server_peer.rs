@@ -43,6 +43,7 @@ struct SendLivenessProbes {
 #[rtype(result = "()")]
 struct FinishLivenessCheck {}
 
+#[derive(Clone, Debug)]
 pub enum LivenessMarks {
     AliveMark,
     DeadMark,
@@ -54,6 +55,8 @@ pub struct ServerPeer {
     pub logger_for_heartbeat: Logger,
     pub peer_port: u32,
     pub port: u32,
+    pub id: u32,
+    pub host_id: u32,
     pub connection_manager: Addr<ConnectionManager>,
     pub udp_socket: Option<Arc<UdpSocket>>,
     pub beat_count: u64,
@@ -80,8 +83,11 @@ impl Handler<BeginLivenessCheck> for ServerPeer {
     type Result = ();
 
     async fn handle(&mut self, _msg: BeginLivenessCheck, _ctx: &mut Self::Context) -> Self::Result {
+        self.beat_count += 1;
         self.logger_for_heartbeat
             .update_prefix(&format!("[PEER-{} B-{}]", self.peer_port, self.beat_count));
+
+        self.logger_for_heartbeat.debug("BeginLivenessCheck");
 
         let res_fut = self.connection_manager.send(GetPeers {}).await;
         if let Ok(Ok(peers)) = res_fut {
@@ -94,13 +100,18 @@ impl Handler<SendLivenessProbes> for ServerPeer {
     type Result = ResponseActFuture<Self, ()>;
 
     fn handle(&mut self, msg: SendLivenessProbes, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger_for_heartbeat.debug("SendLivenessProbes");
+
         if self.collecting_liveness_probes {
             self.liveness_marks.push(LivenessMarks::DeadMark);
         }
 
         let my_address = _ctx.address().clone();
-        if self.liveness_marks.len() as u64 == Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
+        let mut should_early_return = false;
+
+        if self.liveness_marks.len() as u64 >= Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
             my_address.do_send(FinishLivenessCheck {});
+            should_early_return = true;
         }
 
         let peers = msg.peers;
@@ -109,25 +120,32 @@ impl Handler<SendLivenessProbes> for ServerPeer {
         let connection_manager = self.connection_manager.clone();
 
         self.collecting_liveness_probes = true;
+        let my_id = self.id;
 
         Box::pin(
             async move {
+                if (should_early_return) {
+                    return;
+                }
+
                 let res_fut = connection_manager.send(GetLeaderInfo {}).await;
 
                 if let Ok(Ok(leader_data)) = res_fut {
                     match leader_data {
                         Some(leader_data) => {
-                            if let Some(udp_socket) = udp_socket {
-                                let result = Self::send_liveness_probe(
-                                    &leader_data,
-                                    &peers,
-                                    udp_socket,
-                                    &logger,
-                                    &connection_manager,
-                                )
-                                .await;
-                                if result.is_err() {
-                                    logger.warn("Dead detected");
+                            if leader_data.id == my_id {
+                                if let Some(udp_socket) = udp_socket {
+                                    let result = Self::send_liveness_probe(
+                                        &leader_data,
+                                        &peers,
+                                        udp_socket,
+                                        &logger,
+                                        &connection_manager,
+                                    )
+                                    .await;
+                                    if result.is_err() {
+                                        logger.warn("Dead detected");
+                                    }
                                 }
                             }
 
@@ -159,11 +177,6 @@ impl Handler<LivenessEcho> for ServerPeer {
     async fn handle(&mut self, _msg: LivenessEcho, _ctx: &mut Self::Context) -> Self::Result {
         self.collecting_liveness_probes = false;
         self.liveness_marks.push(LivenessMarks::AliveMark);
-
-        let my_address = _ctx.address().clone();
-        if self.liveness_marks.len() as u64 == Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
-            my_address.do_send(FinishLivenessCheck {});
-        }
     }
 }
 
@@ -176,28 +189,41 @@ impl Handler<BeginLivenessCheckWithDelay> for ServerPeer {
         msg: BeginLivenessCheckWithDelay,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        self.beat_count += 1;
         let delay = msg.delay;
+
+        self.logger_for_heartbeat
+            .debug("BeginLivenessCheckWithDelay");
 
         _ctx.notify_later(BeginLivenessCheck {}, Duration::from_secs(delay));
     }
 }
 
-#[async_handler]
 impl Handler<FinishLivenessCheck> for ServerPeer {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
-    async fn handle(
-        &mut self,
-        _msg: FinishLivenessCheck,
-        _ctx: &mut Self::Context,
-    ) -> Self::Result {
+    fn handle(&mut self, _msg: FinishLivenessCheck, _ctx: &mut Self::Context) -> Self::Result {
         self.beat_count += 1;
 
-        _ctx.notify_later(
-            BeginLivenessCheck {},
-            Duration::from_secs(Self::HEARTBEAT_DELAY_IN_SECS),
-        );
+        let liveness_marks = self.liveness_marks.clone();
+        self.liveness_marks = Vec::new();
+
+        let connection_manager = self.connection_manager.clone();
+        let my_address = _ctx.address().clone();
+        let logger = self.logger_for_heartbeat.clone();
+        let host_id = self.host_id;
+
+        logger.debug("Finish");
+
+        Box::pin(
+            async move {
+                Self::report_status_of_peers(&connection_manager, liveness_marks, logger, host_id)
+                    .await;
+                my_address.do_send(BeginLivenessCheckWithDelay {
+                    delay: Self::HEARTBEAT_LONG_DELAY_IN_SECS,
+                });
+            }
+            .into_actor(self),
+        )
     }
 }
 
@@ -319,9 +345,17 @@ impl Handler<LivenessProbe> for ServerPeer {
 
                 logger.debug(&format!("Will probe {}", server_addr));
 
-                let res = socket.send_to(msg_to_send.as_bytes(), server_addr).await;
-                if let Err(e) = res {
-                    logger.error(&format!("Could not send message to UDP socket: {e}"));
+                let timeout_duration = Duration::from_millis(300);
+                match tokio::time::timeout(
+                    timeout_duration,
+                    socket.send_to(msg_to_send.as_bytes(), server_addr),
+                )
+                .await
+                {
+                    Ok(a) => {}
+                    Err(e) => {
+                        logger.error(&format!("Could not send message to UDP socket: {e}"));
+                    }
                 }
             }
             .into_actor(self),
@@ -378,11 +412,13 @@ impl Handler<SendUpdateRestaurantData> for ServerPeer {
 }
 
 impl ServerPeer {
-    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 2;
-    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 4;
+    pub const HEARTBEAT_DELAY_IN_SECS: u64 = 1;
+    pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 2;
     pub const MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD: u64 = 2;
 
     pub fn new(
+        host_id: u32,
+        id: u32,
         tcp_sender: Addr<TcpSender>,
         port: u32,
         peer_port: u32,
@@ -397,6 +433,8 @@ impl ServerPeer {
             tcp_sender,
             logger,
             logger_for_heartbeat,
+            id,
+            host_id,
             port,
             peer_port,
             connection_manager,
@@ -456,15 +494,33 @@ impl ServerPeer {
 
     async fn report_status_of_peers(
         connection_manager: &Addr<ConnectionManager>,
-        liveness_marks: HashMap<PeerId, bool>,
+        liveness_marks: Vec<LivenessMarks>,
+        logger: Logger,
+        host_id: u32,
     ) {
-        for peer_id in liveness_marks.keys() {
-            match liveness_marks.get(peer_id) {
-                Some(true) => {
-                    connection_manager.do_send(PeerDisconnected { peer_id: *peer_id });
+        let mut dead_count = 0;
+
+        for liveness_mark in liveness_marks {
+            match liveness_mark {
+                LivenessMarks::DeadMark => dead_count += 1,
+                LivenessMarks::AliveMark => {}
+            }
+        }
+
+        let leader_data_res = connection_manager.send(GetLeaderInfo {}).await;
+
+        if let Ok(Ok(leader_data)) = leader_data_res {
+            match leader_data {
+                Some(leader_data) => {
+                    if host_id != leader_data.id {
+                        if dead_count >= Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
+                            connection_manager.do_send(PeerDisconnected {
+                                peer_id: leader_data.id,
+                            });
+                        }
+                    }
                 }
-                Some(false) => {}
-                None => {}
+                None => logger.debug("No leader data found"),
             }
         }
     }

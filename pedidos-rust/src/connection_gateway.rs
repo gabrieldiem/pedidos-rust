@@ -2,6 +2,7 @@ use crate::connection_manager::{ConnectionManager, LeaderData};
 use crate::messages::{GetLeaderInfo, IsPeerConnected, LivenessEcho};
 use actix::Addr;
 use common::configuration::Configuration;
+use common::constants::NOT_A_PEER_PORT;
 use common::protocol::{SocketMessage, UNKNOWN_LEADER};
 use common::utils::logger::Logger;
 use std::net::SocketAddr;
@@ -11,8 +12,6 @@ use tokio::net::UdpSocket;
 pub struct ConnectionGateway {}
 
 impl ConnectionGateway {
-    const NOT_A_PEER_PORT: u32 = 0;
-
     fn deserialize_message(
         buf: &[u8],
         size: usize,
@@ -38,7 +37,7 @@ impl ConnectionGateway {
             }
         }
 
-        (false, Self::NOT_A_PEER_PORT)
+        (false, NOT_A_PEER_PORT)
     }
 
     async fn handle_incomming_peer_request(

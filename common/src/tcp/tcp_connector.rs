@@ -17,7 +17,7 @@ impl Actor for TcpConnector {
 
 /// Iterates through a list of ports until it can connect with 1
 impl TcpConnector {
-    const MAX_WAITING_PERIOD_UDP_IN_MILISECONDS: u64 = 500;
+    const MAX_WAITING_PERIOD_UDP_IN_MILISECONDS: u64 = 150;
     const MAX_CONNECTION_PASSES: u64 = 3;
 
     pub fn new(source_port: u32, dest_ports: Vec<u32>) -> TcpConnector {
@@ -29,13 +29,14 @@ impl TcpConnector {
     }
 
     async fn finish_connection(&self, port: u32) -> Result<TcpStream, Box<dyn std::error::Error>> {
-        let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
+        let server_sockaddr: SocketAddr = format!("{}:{}", DEFAULT_PR_HOST, port).parse()?;
+        let local_addr: SocketAddr =
+            format!("{}:{}", DEFAULT_PR_HOST, self.source_port as u16).parse()?;
+
         let socket = TcpSocket::new_v4()?;
-        let local_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), self.source_port as u16);
         socket.bind(local_addr)?;
 
-        match socket.connect(server_sockaddr.parse()?).await {
+        match socket.connect(server_sockaddr).await {
             Ok(stream_connected) => {
                 self.logger
                     .info(&format!("Using address {}", stream_connected.local_addr()?));
@@ -170,8 +171,8 @@ impl TcpConnector {
             }
             Err(e) => {
                 logger.warn(&format!(
-                    "Timeout of {}s for {}: connection unresponsive",
-                    timeout_duration.as_secs(),
+                    "Timeout of {}ms for {}: connection unresponsive",
+                    timeout_duration.as_millis(),
                     server_sockaddr
                 ));
                 Err(e.into())

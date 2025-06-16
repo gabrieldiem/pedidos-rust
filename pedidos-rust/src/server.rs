@@ -1,7 +1,7 @@
 use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{ElectionCoordinatorReceived, RegisterPeerServer, StartHeartbeat};
+use crate::messages::{RegisterPeerServer, StartHeartbeat};
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -123,6 +123,8 @@ impl Server {
                 .start();
 
                 ServerPeer::new(
+                    self.id,
+                    peer_id,
                     tcp_sender,
                     self.port,
                     peer_port,
@@ -146,10 +148,6 @@ impl Server {
         configuration: Configuration,
     ) -> Result<Arc<UdpSocket>, Box<dyn std::error::Error>> {
         let logger = Logger::new(Some("[CONN-GATEWAY]"));
-        // let port_clone = self.port;
-        // let id_clone = self.id;
-        // let connection_manager = self.connection_manager.clone();
-        // let configuration = self.configuration.clone();
 
         let local_addr: SocketAddr = match format!("{}:{}", DEFAULT_PR_HOST, port).parse() {
             Ok(addr) => addr,
@@ -240,6 +238,8 @@ impl Server {
             .start();
 
             ServerPeer::new(
+                self.id,
+                peer_id,
                 tcp_sender,
                 self.port,
                 peer_port,
