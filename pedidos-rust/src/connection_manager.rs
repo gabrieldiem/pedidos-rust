@@ -12,12 +12,7 @@ use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, Wrap
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
-use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
-    DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
-    Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
-    SendUpdateCustomerData,
-};
+use common::protocol::{AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SendUpdateCustomerData};
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
 
@@ -793,6 +788,32 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
                 .warn("Failed to find customer data when notifying rider arrived");
         }
     }
+}
+
+#[async_handler]
+impl Handler<LocationUpdateForRider> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: LocationUpdateForRider,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger.debug(&format!(
+            "Updating location for rider {} to {:?}",
+            msg.rider_id, msg.new_location
+        ));
+
+        if let Some(rider_data) = self.riders.get_mut(&msg.rider_id) {
+            rider_data.location = Some(msg.new_location);
+        } else {
+            self.logger.warn(&format!(
+                "Tried to update location for unknown rider: {}",
+                msg.rider_id
+            ));
+        }
+    }
+
 }
 
 #[async_handler]
