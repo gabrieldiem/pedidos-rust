@@ -126,7 +126,7 @@ impl Handler<SendLivenessProbes> for ServerPeer {
 
         Box::pin(
             async move {
-                if (should_early_return) {
+                if should_early_return {
                     return;
                 }
 
@@ -354,7 +354,7 @@ impl Handler<LivenessProbe> for ServerPeer {
                 )
                 .await
                 {
-                    Ok(a) => {}
+                    Ok(_) => {}
                     Err(e) => {
                         logger.error(&format!("Could not send message to UDP socket: {e}"));
                     }
@@ -621,12 +621,12 @@ impl ServerPeer {
         if let Ok(Ok(leader_data)) = leader_data_res {
             match leader_data {
                 Some(leader_data) => {
-                    if host_id != leader_data.id {
-                        if dead_count >= Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD {
-                            connection_manager.do_send(PeerDisconnected {
-                                peer_id: leader_data.id,
-                            });
-                        }
+                    if host_id != leader_data.id
+                        && dead_count >= Self::MAX_LIVENESS_MARKS_TO_DETERMINE_DEAD
+                    {
+                        connection_manager.do_send(PeerDisconnected {
+                            peer_id: leader_data.id,
+                        });
                     }
                 }
                 None => logger.debug("No leader data found"),
@@ -639,7 +639,7 @@ impl ServerPeer {
         peers: &HashMap<PeerId, Addr<ServerPeer>>,
         udp_socket: Arc<UdpSocket>,
         logger: &Logger,
-        connection_manager: &Addr<ConnectionManager>,
+        _connection_manager: &Addr<ConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let leader_addr = match peers.get(&leader_data.id) {
             Some(addr) => addr,

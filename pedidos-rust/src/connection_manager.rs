@@ -658,7 +658,7 @@ impl Handler<OrderRequest> for ConnectionManager {
                 .info(&format!("Update being sent to {next_peer_id}",));
             peer.do_send(SendUpdateOrderInProgressData {
                 customer_id: msg.customer_id,
-                customer_location: customer_location,
+                customer_location,
                 order_price: Some(msg.order_price),
                 rider_id: None,
             });
@@ -1042,7 +1042,7 @@ impl Handler<UpdateCustomerData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateCustomerData {
@@ -1077,7 +1077,7 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateRestaurantData {
@@ -1111,7 +1111,7 @@ impl Handler<UpdateRiderData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateRiderData {
@@ -1136,7 +1136,7 @@ impl Handler<UpdateOrderInProgressData> for ConnectionManager {
 
     fn handle(&mut self, msg: UpdateOrderInProgressData, _ctx: &mut Self::Context) -> Self::Result {
         self.orders_in_process
-            .entry(msg.customer_id.clone())
+            .entry(msg.customer_id)
             .and_modify(|data| {
                 data.customer_id = msg.customer_id;
                 data.customer_location = msg.customer_location;
@@ -1151,7 +1151,7 @@ impl Handler<UpdateOrderInProgressData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateOrderInProgressData {
@@ -1180,7 +1180,7 @@ impl Handler<RemoveOrderInProgressData> for ConnectionManager {
         self.orders_in_process.remove(&msg.customer_id);
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendRemoveOrderInProgressData {
@@ -1220,7 +1220,7 @@ impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
         }
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendPushPendingDeliveryRequest {
@@ -1244,11 +1244,15 @@ impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
 impl Handler<PopPendingDeliveryRequest> for ConnectionManager {
     type Result = ();
 
-    fn handle(&mut self, msg: PopPendingDeliveryRequest, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        _msg: PopPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         let popped = self.pending_delivery_requests.pop_front();
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendPopPendingDeliveryRequest {});

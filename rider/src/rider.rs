@@ -2,19 +2,14 @@ use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
-use common::constants::{
-    DELIVERY_ACCEPT_PROBABILITY, MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS,
-};
+use common::constants::DELIVERY_ACCEPT_PROBABILITY;
 use common::protocol::{
-    DeliveryOffer, DeliveryOfferConfirmed, FinishDelivery, GetRestaurants, Location,
-    LocationUpdate, Order, OrderContent, PushNotification, SocketMessage, Stop,
+    DeliveryOffer, DeliveryOfferConfirmed, Location, LocationUpdate, SocketMessage, Stop,
 };
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
-use rand::seq::IndexedRandom;
-use rand::{Rng, rng, thread_rng};
 use std::io;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader, split};

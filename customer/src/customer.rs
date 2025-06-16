@@ -12,7 +12,7 @@ use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use rand::seq::IndexedRandom;
-use rand::{Rng, rng, thread_rng};
+use rand::{Rng, rng};
 use std::io;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio_stream::wrappers::LinesStream;

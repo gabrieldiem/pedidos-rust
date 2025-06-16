@@ -9,10 +9,6 @@ use tokio::net::UdpSocket;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct Start {}
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
 pub struct StartHeartbeat {
     pub udp_socket: Arc<UdpSocket>,
 }
@@ -59,12 +55,6 @@ pub struct RegisterPaymentSystem {
 pub struct RegisterPeerServer {
     pub id: u32,
     pub address: Addr<ServerPeer>,
-}
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct RegisterNextPeerServer {
-    pub id: u32,
 }
 
 #[derive(Message, Debug)]
