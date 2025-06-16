@@ -4,13 +4,15 @@ use serde::{Deserialize, Serialize};
 pub struct SinglePedidosRustInfo {
     pub id: u32,
     pub port: u32,
-    pub ports_for_peers: Vec<u32>,
+    pub ports_for_peers: Vec<u32>
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SingleCustomerInfo {
     pub id: u32,
     pub port: u32,
+    pub x: u16,
+    pub y: u16
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
