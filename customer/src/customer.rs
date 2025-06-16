@@ -228,7 +228,18 @@ impl Customer {
                 dest_ports: dest_ports.clone(),
             });
 
-            let customer_location = Location::new(10, 10);
+            let customer_info = match config.customer.infos.iter().find(|c| c.id == id) {
+                Some(info) => info,
+                None => {
+                    panic!("No se encontró el cliente con id: {}", id);
+                }
+            };
+
+            let customer_location = Location::new(customer_info.x, customer_info.y);
+            logger.info(&format!(
+                "Customer {} started at port {} with location ({}, {})",
+                id, my_port, customer_location.x, customer_location.y
+            ));
             Customer {
                 tcp_sender,
                 logger: Logger::new(Some("[CUSTOMER]")),
