@@ -36,6 +36,7 @@ impl Actor for ClientConnection {
 #[rtype(result = "()")]
 pub struct SendRestaurants {
     customer_location: Location,
+    is_new_customer: bool,
 }
 
 // No uso #[async_handler] porque, al hacer dos llamadas a send . await hay múltiples combinaciones
@@ -53,19 +54,20 @@ impl Handler<SendRestaurants> for ClientConnection {
         let id = self.id;
 
         let fut = async move {
-            let res = connection_manager
-                .send(RegisterCustomer {
-                    id,
-                    location: msg.customer_location,
-                    address: addr,
-                })
-                .await;
+            if msg.is_new_customer {
+                let res = connection_manager
+                    .send(RegisterCustomer {
+                        id,
+                        location: msg.customer_location,
+                        address: addr,
+                    })
+                    .await;
 
-            if let Err(e) = res {
-                logger.error(&format!("Failed to register customer: {}", e));
-                return;
+                if let Err(e) = res {
+                    logger.error(&format!("Failed to register customer: {}", e));
+                    return;
+                }
             }
-
             logger.debug("Sending Restaurants");
 
             let res2 = connection_manager
@@ -76,7 +78,6 @@ impl Handler<SendRestaurants> for ClientConnection {
                 logger.error(&format!("Failed to register restaurant: {}", e));
             }
         };
-
         Box::pin(fut.into_actor(self))
     }
 }
@@ -348,9 +349,10 @@ impl ClientConnection {
         let parsed_line = serde_json::from_str(&line_read);
         match parsed_line {
             Ok(message) => match message {
-                SocketMessage::GetRestaurants(customer_location) => {
+                /// TODO: que a un new customer lo registre, a uno viejo solo le envia los restaurantes
+                SocketMessage::GetRestaurants(customer_location, is_new_customer) => {
                     self.logger.debug("Got request for GetRestaurants");
-                    ctx.address().do_send(SendRestaurants { customer_location });
+                    ctx.address().do_send(SendRestaurants { customer_location, is_new_customer });
                 }
                 SocketMessage::Order(order) => {
                     self.logger.debug("Got order request");

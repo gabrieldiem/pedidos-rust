@@ -21,6 +21,7 @@ pub struct ConnectTo {
 #[rtype(result = "()")]
 pub struct GetRestaurants {
     pub customer_location: Location,
+    pub new_customer: bool,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug)]
@@ -191,7 +192,7 @@ pub const UNKNOWN_LEADER: u32 = 0;
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum SocketMessage {
-    GetRestaurants(Location),              // Location is customer_location
+    GetRestaurants(Location, bool),        // Location is customer_location, bool is new_customer
     Restaurants(String),                   // String is serialized json restaurants
     Order(OrderContent),                   // OrderContent is the order content
     PushNotification(String),              // String is the notification message

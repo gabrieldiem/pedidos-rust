@@ -133,7 +133,7 @@ impl Server {
                     connection_manager: self.connection_manager.clone(),
                 }
             });
-
+            // HARDCODEADO PARA PODER HACER PRUEBAS
             self.connection_manager.do_send(RegisterPeerServer {
                 id: peer_id,
                 address: peer,

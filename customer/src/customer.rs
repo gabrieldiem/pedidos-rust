@@ -48,6 +48,7 @@ impl Handler<Start> for Customer {
     async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
         _ctx.address().do_send(GetRestaurants {
             customer_location: self.location,
+            new_customer: true,
         });
     }
 }
@@ -59,6 +60,7 @@ impl Handler<Stop> for Customer {
     async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Stopping Customer");
         _ctx.stop();
+        std::process::exit(0);
     }
 }
 
@@ -68,7 +70,7 @@ impl Handler<GetRestaurants> for Customer {
 
     async fn handle(&mut self, msg: GetRestaurants, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Getting Restaurants");
-        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(msg.customer_location)) {
+        if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(msg.customer_location, msg.new_customer)) {
             self.logger.error(&e.to_string());
         }
     }
@@ -141,11 +143,31 @@ impl Handler<PushNotification> for Customer {
 impl Handler<FinishDelivery> for Customer {
     type Result = ();
 
-    async fn handle(&mut self, _msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
-        self.logger.info(_msg.reason.as_str());
+    async fn handle(&mut self, msg: FinishDelivery, ctx: &mut Self::Context) -> Self::Result {
+        self.logger.info(msg.reason.as_str());
 
-        _ctx.address().do_send(Stop {});
-        // TODO: que pueda hacer otro pedido, o que al menos mate este proceso
+        let addr = ctx.address();
+        let location = self.location;
+        tokio::spawn(async move {
+            use tokio::io::{AsyncBufReadExt, BufReader};
+            let stdin = tokio::io::stdin();
+            let mut console_reader = BufReader::new(stdin).lines();
+
+            let logger = Logger::new(Some("[CUSTOMER]"));
+            logger.info("Presiona ENTER para realizar un nuevo pedido, o escribe 'q', 'exit' o 'quit' para salir...");
+
+            if let Ok(Some(input)) = console_reader.next_line().await {
+                let input = input.trim().to_lowercase();
+                if input == "q" || input == "exit" || input == "quit" {
+                    addr.do_send(Stop {});
+                } else {
+                    addr.do_send(GetRestaurants {
+                        customer_location: location,
+                        new_customer: false,
+                    });
+                }
+            }
+        });
     }
 }
 
