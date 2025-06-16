@@ -17,3 +17,5 @@ pub const MIN_ORDER_PRICE: f64 = 5.0;
 pub const MAX_ORDER_PRICE: f64 = 100.0;
 pub const N_RIDERS_TO_NOTIFY: usize = 2;
 pub const DELIVERY_ACCEPT_PROBABILITY: f32 = 0.5;
+
+pub const NOT_A_PEER_PORT: u32 = 0;

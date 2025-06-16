@@ -211,19 +211,25 @@ impl Handler<StartHeartbeat> for ConnectionManager {
     type Result = ();
 
     fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
+        if self.server_peers.is_empty() {
+            self.logger.info("No peer connection. Taking leader role");
+            _ctx.address().do_send(ElectionCoordinatorReceived {
+                leader_port: self.port,
+            });
+            return;
+        }
+
         for peer_id in self.server_peers.keys() {
-            if *peer_id > self.id {
-                match self.server_peers.get(peer_id) {
-                    Some(peer_addr) => {
-                        peer_addr.do_send(StartHeartbeat {
-                            udp_socket: msg.udp_socket.clone(),
-                        });
-                    }
-                    None => {
-                        self.logger.warn("No peer found");
-                    }
-                };
-            }
+            match self.server_peers.get(peer_id) {
+                Some(peer_addr) => {
+                    peer_addr.do_send(StartHeartbeat {
+                        udp_socket: msg.udp_socket.clone(),
+                    });
+                }
+                None => {
+                    self.logger.warn("No peer found");
+                }
+            };
         }
     }
 }
