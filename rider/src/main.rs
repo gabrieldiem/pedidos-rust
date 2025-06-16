@@ -174,8 +174,6 @@ impl Handler<DeliveryOfferConfirmed> for Rider {
         self.busy = true;
         self.customer_id = Some(msg.customer_id);
 
-        // TODO: needs logic to handle when multiple riders accept the offer
-        // TODO: needs to handle rejection
         _ctx.address().do_send(GoToCustomerLocation);
     }
 }
