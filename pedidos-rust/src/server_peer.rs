@@ -1,7 +1,8 @@
 use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
-    LivenessProbe, PeerDisconnected, StartHeartbeat, UpdateCustomerData, UpdateRestaurantData,
+    LivenessProbe, PeerDisconnected, RemoveOrderInProgressData, StartHeartbeat, UpdateCustomerData,
+    UpdateRestaurantData,
 };
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
@@ -10,8 +11,8 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData,
-    SendUpdateRestaurantData, SocketMessage,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendRemoveOrderInProgressData,
+    SendUpdateCustomerData, SendUpdateOrderInProgressData, SendUpdateRestaurantData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -332,15 +333,6 @@ impl Handler<LivenessProbe> for ServerPeer {
 }
 
 #[async_handler]
-impl Handler<UpdateCustomerData> for ServerPeer {
-    type Result = ();
-
-    async fn handle(&mut self, msg: UpdateCustomerData, _ctx: &mut Self::Context) -> Self::Result {
-        self.connection_manager.do_send(msg);
-    }
-}
-
-#[async_handler]
 impl Handler<SendUpdateCustomerData> for ServerPeer {
     type Result = ();
 
@@ -373,6 +365,45 @@ impl Handler<SendUpdateRestaurantData> for ServerPeer {
             msg.restaurant_name,
             msg.location,
         )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendUpdateOrderInProgressData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdateOrderInProgressData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdateOrderInProgressData(
+            msg.customer_id,
+            msg.customer_location,
+            msg.order_price,
+            msg.rider_id,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendRemoveOrderInProgressData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendRemoveOrderInProgressData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) =
+            self.send_message(&SocketMessage::RemoveOrderInProgressData(msg.customer_id))
+        {
             self.logger.error(&e.to_string());
             return;
         }
@@ -435,6 +466,13 @@ impl ServerPeer {
                         restaurant_name,
                         location,
                     })
+                }
+                SocketMessage::RemoveOrderInProgressData(customer_id) => {
+                    self.logger.info(&format!(
+                        "Removing data for order from customer {customer_id}"
+                    ));
+                    self.connection_manager
+                        .do_send(RemoveOrderInProgressData { customer_id })
                 }
                 _ => {
                     self.logger

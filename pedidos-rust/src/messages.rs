@@ -160,6 +160,21 @@ pub struct UpdateRestaurantData {
     pub location: Location,
 }
 
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct UpdateOrderInProgressData {
+    pub rider_id: Option<u32>,
+    pub order_price: Option<f64>,
+    pub customer_location: Location,
+    pub customer_id: u32,
+}
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct RemoveOrderInProgressData {
+    pub customer_id: u32,
+}
+
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
 pub struct ElectionCallReceived {}
