@@ -1,20 +1,33 @@
-use crate::connection_manager::ConnectionManager;
-use crate::messages::{GetPeers, Start};
+use crate::connection_manager::{ConnectionManager, PeerId};
+use crate::messages::{GetPeers, LivenessProbe, StartHeartbeat};
 use crate::server_peer::ServerPeer;
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Message};
+use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
-use common::protocol::LivenessProbe;
 use common::utils::logger::Logger;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::net::UdpSocket;
 use tokio::time::Duration;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-struct CheckLiveness {}
+struct BeginLivenessCheck {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+struct ExecuteLivenessCheck {
+    peers: HashMap<PeerId, Addr<ServerPeer>>,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+struct FinishLivenessCheck {}
 
 pub struct HeartbeatMonitor {
     logger: Logger,
     connection_manager: Addr<ConnectionManager>,
     beat_count: u64,
+    udp_socket: Option<Arc<UdpSocket>>,
 }
 
 impl HeartbeatMonitor {
@@ -26,15 +39,16 @@ impl HeartbeatMonitor {
             logger: Logger::new(Some(&format!("[{}]", Self::BASE_LOGGER_PREFIX))),
             connection_manager,
             beat_count: 0,
+            udp_socket: None,
         }
     }
 
     async fn check_aliveness(
-        &self,
-        peer_id: u32,
+        _peer_id: u32,
         peer_addr: &Addr<ServerPeer>,
+        udp_socket: Arc<UdpSocket>,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        peer_addr.send(LivenessProbe {}).await?;
+        peer_addr.send(LivenessProbe { udp_socket }).await?;
 
         Ok(true)
     }
@@ -45,44 +59,85 @@ impl Actor for HeartbeatMonitor {
 }
 
 #[async_handler]
-impl Handler<Start> for HeartbeatMonitor {
+impl Handler<StartHeartbeat> for HeartbeatMonitor {
     type Result = ();
 
-    async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.info("Starting HeartbeatMonitor");
+        self.udp_socket = Some(msg.udp_socket);
 
         _ctx.notify_later(
-            CheckLiveness {},
+            BeginLivenessCheck {},
             Duration::from_secs(Self::HEARTBEAT_DELAY_IN_SECS),
         );
     }
 }
 
 #[async_handler]
-impl Handler<CheckLiveness> for HeartbeatMonitor {
+impl Handler<BeginLivenessCheck> for HeartbeatMonitor {
     type Result = ();
 
-    async fn handle(&mut self, _msg: CheckLiveness, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, _msg: BeginLivenessCheck, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.update_prefix(&format!(
             "[{} B-{}]",
             Self::BASE_LOGGER_PREFIX,
             self.beat_count
         ));
 
-        let fut = self.connection_manager.send(GetPeers {});
-        let res_fut = fut.await;
+        let res_fut = self.connection_manager.send(GetPeers {}).await;
+        if let Ok(Ok(peers)) = res_fut {
+            _ctx.address().do_send(ExecuteLivenessCheck { peers })
+        };
+    }
+}
 
-        if let Ok(res_peers) = res_fut {
-            if let Ok(peers) = res_peers {
-                for (peer_id, peer_addr) in peers {
-                    //self.check_aliveness(peer_id, &peer_addr).await?;
+impl Handler<ExecuteLivenessCheck> for HeartbeatMonitor {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(&mut self, msg: ExecuteLivenessCheck, _ctx: &mut Self::Context) -> Self::Result {
+        let peers = msg.peers;
+        let logger = self.logger.clone();
+        let udp_socket = self.udp_socket.clone();
+        let my_address = _ctx.address().clone();
+
+        Box::pin(
+            async move {
+                if let Some(udp_socket) = udp_socket {
+                    let number_of_peers = peers.len();
+                    logger.debug(&format!("Number of peers: {}", peers.len()));
+                    for (peer_id, peer_addr) in peers {
+                        let res =
+                            Self::check_aliveness(peer_id, &peer_addr, udp_socket.clone()).await;
+                        match res {
+                            Ok(true) => {
+                                logger.info("ALIVE");
+                            }
+                            Ok(false) => logger.info("DEAD"),
+                            Err(err) => logger.info("ERROR ALIVE"),
+                        }
+                    }
+
+                    my_address.do_send(FinishLivenessCheck {});
                 }
             }
-        }
+            .into_actor(self),
+        )
+    }
+}
 
+#[async_handler]
+impl Handler<FinishLivenessCheck> for HeartbeatMonitor {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: FinishLivenessCheck,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         self.beat_count += 1;
+
         _ctx.notify_later(
-            CheckLiveness {},
+            BeginLivenessCheck {},
             Duration::from_secs(Self::HEARTBEAT_DELAY_IN_SECS),
         );
     }

@@ -1,10 +1,12 @@
 use crate::connection_manager::{ConnectionManager, LeaderData};
+use crate::heartbeat::HeartbeatMonitor;
 use crate::messages::{GetLeaderInfo, IsPeerConnected};
 use actix::Addr;
 use common::configuration::Configuration;
 use common::protocol::{SocketMessage, UNKNOWN_LEADER};
 use common::utils::logger::Logger;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::net::UdpSocket;
 
 pub struct ConnectionGateway {}
@@ -119,28 +121,31 @@ impl ConnectionGateway {
         Ok(())
     }
 
+    async fn process_liveness_probe(
+        socket: &UdpSocket,
+        addr: SocketAddr,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let msg: String = Self::serialize_message(SocketMessage::LivenessEcho)?;
+        socket.send_to(msg.as_bytes(), addr).await?;
+
+        Ok(())
+    }
+
+    async fn process_liveness_echo(
+        heartbeat_monitor: Addr<HeartbeatMonitor>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
     pub async fn run(
         port: u32,
         id: u32,
         logger: Logger,
         connection_manager: Addr<ConnectionManager>,
+        heartbeat_monitor: Addr<HeartbeatMonitor>,
         configuration: Configuration,
+        socket: Arc<UdpSocket>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let local_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port as u16);
-
-        let socket = match UdpSocket::bind(local_addr).await {
-            Ok(socket) => socket,
-            Err(e) => {
-                logger.error(&format!("Could not get UDP socket: {e}"));
-                return Err(e.into());
-            }
-        };
-
-        logger.info(&format!(
-            "Connection Gateway over UDP listening on {}",
-            local_addr
-        ));
-
         let mut buf = [0; 2048];
 
         loop {
@@ -160,6 +165,14 @@ impl ConnectionGateway {
                                 port,
                             )
                             .await?;
+                        }
+                        SocketMessage::LivenessProbe => {
+                            logger.debug("Received liveness probe");
+                            Self::process_liveness_probe(&socket, addr).await?;
+                        }
+                        SocketMessage::LivenessEcho => {
+                            logger.debug("Received liveness echo");
+                            Self::process_liveness_echo(heartbeat_monitor.clone()).await?;
                         }
                         _ => {
                             logger.warn(&format!("Unrecognized message: {:?}", received_msg));

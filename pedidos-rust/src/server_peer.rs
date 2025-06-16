@@ -1,19 +1,24 @@
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{ElectionCallReceived, ElectionCoordinatorReceived, UpdateCustomerData};
-use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
+use crate::messages::{
+    ElectionCallReceived, ElectionCoordinatorReceived, LivenessProbe, UpdateCustomerData,
+};
+use actix::{
+    Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, StreamHandler, WrapFuture,
+};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, LivenessProbe, SendUpdateCustomerData,
-    SocketMessage,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::io;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 pub struct ServerPeer {
     pub tcp_sender: Addr<TcpSender>,
     pub logger: Logger,
+    pub peer_port: u32,
     pub port: u32,
     pub connection_manager: Addr<ConnectionManager>,
 }
@@ -31,7 +36,7 @@ impl Handler<ElectionCallReceived> for ServerPeer {
 
         let msg_to_send = SocketMessage::ElectionOk;
         self.logger
-            .debug(&format!("Sending ElectionOk to {}", self.port));
+            .debug(&format!("Sending ElectionOk to {}", self.peer_port));
 
         if let Err(e) = self.send_message(&msg_to_send) {
             self.logger.error(&e.to_string());
@@ -47,7 +52,7 @@ impl Handler<ElectionCall> for ServerPeer {
     async fn handle(&mut self, _msg: ElectionCall, _ctx: &mut Self::Context) -> Self::Result {
         let msg_to_send = SocketMessage::ElectionCall;
         self.logger
-            .debug(&format!("Sending ElectionCall to {}", self.port));
+            .debug(&format!("Sending ElectionCall to {}", self.peer_port));
 
         if let Err(e) = self.send_message(&msg_to_send) {
             self.logger.error(&e.to_string());
@@ -63,7 +68,7 @@ impl Handler<ElectionOk> for ServerPeer {
     async fn handle(&mut self, _msg: ElectionOk, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Received ElectionOk from {}. Waiting for coordinator message",
-            self.port
+            self.peer_port
         ));
     }
 }
@@ -94,8 +99,10 @@ impl Handler<ElectionCoordinator> for ServerPeer {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         let msg_to_send = SocketMessage::ElectionCoordinator;
-        self.logger
-            .debug(&format!("Sending ElectionCoordinator to {}", self.port));
+        self.logger.debug(&format!(
+            "Sending ElectionCoordinator to {}",
+            self.peer_port
+        ));
 
         if let Err(e) = self.send_message(&msg_to_send) {
             self.logger.error(&e.to_string());
@@ -104,17 +111,34 @@ impl Handler<ElectionCoordinator> for ServerPeer {
     }
 }
 
-#[async_handler]
 impl Handler<LivenessProbe> for ServerPeer {
-    type Result = ();
+    type Result = ResponseActFuture<Self, ()>;
 
-    async fn handle(&mut self, _msg: LivenessProbe, _ctx: &mut Self::Context) -> Self::Result {
-        // let msg_to_send = SocketMessage::LivenessProbe;
-        //
-        // if let Err(e) = self.send_message(&msg_to_send) {
-        //     self.logger.error(&e.to_string());
-        //     return;
-        // }
+    fn handle(&mut self, msg: LivenessProbe, _ctx: &mut Self::Context) -> Self::Result {
+        let port = self.port as u16;
+        let peer_port = self.peer_port as u16;
+        let logger = self.logger.clone();
+        let socket = msg.udp_socket.clone();
+
+        Box::pin(
+            async move {
+                let msg_to_send = match Self::serialize_message(&SocketMessage::LivenessProbe) {
+                    Ok(ok_result) => ok_result,
+                    Err(e) => {
+                        logger.error(&format!("Failed to serialize message: {}", e));
+                        return;
+                    }
+                };
+
+                let server_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), peer_port);
+
+                let res = socket.send_to(msg_to_send.as_bytes(), server_addr).await;
+                if let Err(e) = res {
+                    logger.error(&format!("Could not send message to UDP socket: {e}"));
+                }
+            }
+            .into_actor(self),
+        )
     }
 }
 
@@ -161,7 +185,7 @@ impl ServerPeer {
                 }
                 SocketMessage::ElectionCoordinator => {
                     ctx.address().do_send(ElectionCoordinatorReceived {
-                        leader_port: self.port,
+                        leader_port: self.peer_port,
                     });
                 }
                 SocketMessage::UpdateCustomerData(customer_id, location, order_price) => {
@@ -187,12 +211,25 @@ impl ServerPeer {
         }
     }
 
-    fn send_message(&self, socket_message: &SocketMessage) -> Result<(), String> {
-        // message serialization
+    fn serialize_message(
+        socket_message: &SocketMessage,
+    ) -> Result<String, Box<dyn std::error::Error>> {
         let msg_to_send = match serde_json::to_string(socket_message) {
             Ok(ok_result) => ok_result,
             Err(e) => {
-                return Err(format!("Failed to serialize message: {}", e));
+                return Err(format!("Failed to serialize message: {}", e).into());
+            }
+        };
+
+        Ok(msg_to_send)
+    }
+
+    fn send_message(&self, socket_message: &SocketMessage) -> Result<(), String> {
+        // message serialization
+        let msg_to_send = match Self::serialize_message(socket_message) {
+            Ok(ok_result) => ok_result,
+            Err(e) => {
+                return Err(format!("Failed to serialize message: {}", e).into());
             }
         };
 
