@@ -3,8 +3,9 @@ use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
     IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
     PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterPaymentSystem,
-    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
-    StartHeartbeat, UpdateCustomerData, UpdateRestaurantData,
+    RegisterPeerServer, RegisterRestaurant, RegisterRider, RemoveOrderInProgressData,
+    SendNotification, SendRestaurantList, StartHeartbeat, UpdateCustomerData,
+    UpdateOrderInProgressData, UpdateRestaurantData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -12,7 +13,9 @@ use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, Wrap
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
-use common::protocol::{AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SendUpdateCustomerData};
+use common::protocol::{
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SendRemoveOrderInProgressData, SendUpdateCustomerData, SendUpdateOrderInProgressData, SendUpdateRestaurantData
+};
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
 
@@ -593,7 +596,7 @@ impl Handler<OrderRequest> for ConnectionManager {
         if let Some(customer) = self.customers.get_mut(&msg.customer_id) {
             customer.order_price = Some(msg.order_price);
             if let Some((_, peer)) = &self.next_server_peer {
-                peer.do_send(UpdateCustomerData {
+                peer.do_send(SendUpdateCustomerData {
                     customer_id: msg.customer_id,
                     location: customer.location,
                     order_price: customer.order_price,
@@ -603,22 +606,35 @@ impl Handler<OrderRequest> for ConnectionManager {
             self.logger
                 .warn("Failed to find customer data when preparing order");
         }
+        let customer_location = match self.customers.get(&msg.customer_id) {
+            Some(customer) => customer.location,
+            None => {
+                self.logger
+                    .warn("Failed to find customer data when preparing order");
+                return;
+            }
+        };
         self.orders_in_process.insert(
             msg.customer_id,
             OrderData {
                 rider_id: None,
                 order_price: Some(msg.order_price),
-                customer_location: match self.customers.get(&msg.customer_id) {
-                    Some(customer) => customer.location,
-                    None => {
-                        self.logger
-                            .warn("Failed to find customer data when preparing order");
-                        return;
-                    }
-                },
+                customer_location,
                 customer_id: msg.customer_id,
             },
         );
+
+        if let Some((next_peer_id, peer)) = &self.next_server_peer {
+            self.logger
+                .info(&format!("Update being sent to {next_peer_id}",));
+            peer.do_send(SendUpdateOrderInProgressData {
+                customer_id: msg.customer_id,
+                customer_location: customer_location,
+                order_price: Some(msg.order_price),
+                rider_id: None,
+            });
+        };
+
         if let Some(restaurant_address) = self.restaurant_connections.get(&msg.restaurant_name) {
             restaurant_address.do_send(OrderToRestaurant {
                 customer_id: msg.customer_id,
@@ -690,6 +706,11 @@ impl Handler<OrderCancelled> for ConnectionManager {
             customer_adress.do_send(FinishDelivery {
                 reason: "Order cancelled by the restaurant due to lack of stock".to_string(),
             });
+            if let Some((_, peer)) = &self.next_server_peer {
+                peer.do_send(SendRemoveOrderInProgressData {
+                    customer_id: msg.customer_id,
+                });
+            }
         } else {
             self.logger
                 .warn("Failed to find customer data when cancelling order");
@@ -757,6 +778,16 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                             customer_id: msg.customer_id,
                         },
                     );
+                    if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                        self.logger
+                            .info(&format!("Update being sent to {next_peer_id}",));
+                        peer.do_send(SendUpdateOrderInProgressData {
+                            customer_id: msg.customer_id,
+                            customer_location: customer_data.location,
+                            order_price: customer_data.order_price,
+                            rider_id: Some(msg.rider_id),
+                        });
+                    };
                 }
             }
             None => self
@@ -785,6 +816,16 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                             customer_location: order_data.customer_location,
                         });
                     }
+                    if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                        self.logger
+                            .info(&format!("Update being sent to {next_peer_id}",));
+                        peer.do_send(SendUpdateOrderInProgressData {
+                            customer_id: msg.customer_id,
+                            customer_location: order_data.customer_location,
+                            order_price: order_data.order_price,
+                            rider_id: Some(msg.rider_id),
+                        });
+                    };
                     if let Some(customer_address) = self.customer_connections.get(&msg.customer_id)
                     {
                         let notification_msg =
@@ -885,6 +926,12 @@ impl Handler<DeliveryDone> for ConnectionManager {
             return;
         }
 
+        if let Some((_, peer)) = &self.next_server_peer {
+            peer.do_send(SendRemoveOrderInProgressData {
+                customer_id: msg.customer_id,
+            });
+        }
+
         self.logger.debug("Removed finished order");
 
         let price = match order_data.order_price {
@@ -921,6 +968,11 @@ impl Handler<PaymentExecuted> for ConnectionManager {
 
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
             self.orders_in_process.remove(&msg.customer_id);
+            if let Some((_, peer)) = &self.next_server_peer {
+                peer.do_send(SendRemoveOrderInProgressData {
+                    customer_id: msg.customer_id,
+                });
+            }
             let reason_msg = format!("Payment successfully executed for order of {}.", msg.amount,);
             customer_adress.do_send(FinishDelivery {
                 reason: reason_msg.clone(),
@@ -998,6 +1050,74 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
         self.logger.info(&format!(
             "Updated restaurant {} with {:?} location",
             msg.restaurant_name, msg.location
+        ));
+
+        self.process_pending_requests();
+    }
+}
+
+impl Handler<UpdateOrderInProgressData> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: UpdateOrderInProgressData, _ctx: &mut Self::Context) -> Self::Result {
+        self.orders_in_process
+            .entry(msg.customer_id.clone())
+            .and_modify(|data| {
+                data.customer_id = msg.customer_id;
+                data.customer_location = msg.customer_location;
+                data.order_price = msg.order_price;
+                data.rider_id = msg.rider_id
+            })
+            .or_insert(OrderData {
+                customer_id: msg.customer_id,
+                customer_location: msg.customer_location,
+                order_price: msg.order_price,
+                rider_id: msg.rider_id,
+            });
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendUpdateOrderInProgressData {
+                        customer_id: msg.customer_id,
+                        customer_location: msg.customer_location,
+                        order_price: msg.order_price,
+                        rider_id: msg.rider_id,
+                    });
+                }
+            }
+        };
+
+        self.logger.info(&format!(
+            "Updated order in progress for customer {}, location {:?}, price {:?}, rider {:?}",
+            msg.customer_id, msg.customer_location, msg.order_price, msg.rider_id
+        ));
+
+        self.process_pending_requests();
+    }
+}
+
+impl Handler<RemoveOrderInProgressData> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: RemoveOrderInProgressData, _ctx: &mut Self::Context) -> Self::Result {
+        self.orders_in_process.remove(&msg.customer_id);
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendRemoveOrderInProgressData {
+                        customer_id: msg.customer_id,
+                    });
+                }
+            }
+        };
+
+        self.logger.info(&format!(
+            "Removed order in progress for customer {}",
+            msg.customer_id
         ));
 
         self.process_pending_requests();

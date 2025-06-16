@@ -201,6 +201,21 @@ pub struct SendUpdateRestaurantData {
     pub location: Location,
 }
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct SendUpdateOrderInProgressData {
+    pub customer_id: u32,
+    pub customer_location: Location,
+    pub order_price: Option<f64>,
+    pub rider_id: Option<u32>,
+}
+
+#[derive(Message, Debug, Clone)]
+#[rtype(result = "()")]
+pub struct SendRemoveOrderInProgressData {
+    pub customer_id: u32,
+}
+
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -237,6 +252,8 @@ pub enum SocketMessage {
     ElectionCoordinator,
     UpdateCustomerData(u32, Location, Option<f64>),
     UpdateRestaurantData(String, Location),
+    UpdateOrderInProgressData(u32, Location, Option<f64>, Option<u32>),
+    RemoveOrderInProgressData(u32),
     LivenessProbe,
     LivenessEcho,
 }
