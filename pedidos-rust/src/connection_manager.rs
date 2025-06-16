@@ -1,8 +1,9 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, FindRider, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest,
-    PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterPaymentSystem,
-    RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList,
+    PaymentAuthorized, PaymentDenied, PaymentExecuted, RegisterCustomer, RegisterNextPeerServer,
+    RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification,
+    SendRestaurantList, UpdateCustomer,
 };
 use crate::nearby_entitys::nearby_restaurants;
 use crate::server_peer::ServerPeer;
@@ -12,7 +13,7 @@ use common::constants::NO_RESTAURANTS;
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, ElectionCall,
     ExecutePayment, FinishDelivery, Location, OrderToRestaurant, PushNotification, Restaurants,
-    RiderArrivedAtCustomer,
+    RiderArrivedAtCustomer, UpdateCustomerData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -23,19 +24,13 @@ type RestaurantId = u32;
 type RestaurantName = String;
 
 pub struct CustomerData {
-    pub address: Addr<ClientConnection>,
     pub location: Location,
     pub order_price: Option<f64>,
 }
 
 impl CustomerData {
-    pub fn new(
-        address: Addr<ClientConnection>,
-        location: Location,
-        order_price: Option<f64>,
-    ) -> CustomerData {
+    pub fn new(location: Location, order_price: Option<f64>) -> CustomerData {
         CustomerData {
-            address,
             location,
             order_price,
         }
@@ -69,6 +64,7 @@ pub struct ConnectionManager {
 
     // Entities
     pub riders: HashMap<RiderId, Addr<ClientConnection>>,
+    pub customer_connections: HashMap<CustomerId, Addr<ClientConnection>>,
     pub customers: HashMap<CustomerId, CustomerData>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
@@ -79,6 +75,7 @@ pub struct ConnectionManager {
     // Peers
     pub server_peers: HashMap<u32, Addr<ServerPeer>>,
     pub leader: Option<u32>,
+    pub next_server_peer: Option<Addr<ServerPeer>>,
 }
 
 impl ConnectionManager {
@@ -87,6 +84,7 @@ impl ConnectionManager {
             id,
             logger: Logger::new(Some("[CONNECTION-MANAGER]")),
             riders: HashMap::new(),
+            customer_connections: HashMap::new(),
             customers: HashMap::new(),
             orders_in_process: HashMap::new(),
             pending_delivery_requests: VecDeque::new(),
@@ -94,6 +92,7 @@ impl ConnectionManager {
             payment_system: None,
             server_peers: HashMap::new(),
             leader: None,
+            next_server_peer: None,
         }
     }
 
@@ -151,7 +150,52 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
     async fn handle(&mut self, msg: RegisterPeerServer, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering server peer with ID {}", msg.id));
-        self.server_peers.entry(msg.id).or_insert(msg.address);
+        self.server_peers
+            .entry(msg.id)
+            .or_insert(msg.address.clone());
+
+        let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) = self
+            .server_peers
+            .keys()
+            .into_iter()
+            .partition(|&n| *n <= self.id);
+        let updated_next_peer_id;
+        if greater_peers.is_empty() {
+            updated_next_peer_id = *lesser_peers.iter().min().unwrap_or(&&0);
+        } else {
+            updated_next_peer_id = *greater_peers.iter().min().unwrap_or(&&0);
+        }
+        self.next_server_peer = Some(
+            self.server_peers
+                .get(&updated_next_peer_id)
+                .unwrap()
+                .clone(),
+        );
+        self.logger.info(&format!(
+            "Updated next peer server to peer no {updated_next_peer_id}"
+        ));
+        self.process_pending_requests();
+    }
+}
+
+#[async_handler]
+impl Handler<RegisterNextPeerServer> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: RegisterNextPeerServer,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger
+            .debug(&format!("Registering server peer with ID {}", msg.id));
+        match self.server_peers.get(&msg.id) {
+            Some(address) => self.next_server_peer = Some(address.clone()),
+            None => {
+                self.logger
+                    .info(&format!("Failed choosing {} as next server peer ", msg.id));
+            }
+        }
         self.process_pending_requests();
         self.logger.info(&format!("{:?}", self.server_peers));
     }
@@ -202,7 +246,17 @@ impl Handler<RegisterCustomer> for ConnectionManager {
             .debug(&format!("Registering Customer with ID {}", msg.id));
         self.customers
             .entry(msg.id)
-            .or_insert(CustomerData::new(msg.address, msg.location, None));
+            .or_insert(CustomerData::new(msg.location, None));
+        self.customer_connections
+            .entry(msg.id)
+            .or_insert(msg.address);
+        if let Some(peer) = &self.next_server_peer {
+            peer.do_send(UpdateCustomerData {
+                customer_id: msg.id,
+                location: msg.location,
+                order_price: None,
+            })
+        }
         self.process_pending_requests();
     }
 }
@@ -261,9 +315,15 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                 self.logger
                     .debug(&format!("Restaurant list to send: {}", restaurant_list));
 
-                customer.address.do_send(Restaurants {
-                    data: restaurant_list,
-                });
+                match self.customer_connections.get(&msg.customer_id) {
+                    Some(customer_address) => customer_address.do_send(Restaurants {
+                        data: restaurant_list,
+                    }),
+                    None => {
+                        self.logger
+                            .warn("Failed to find customer data when sending restaurant list");
+                    }
+                }
             }
             None => {
                 self.logger
@@ -311,8 +371,8 @@ impl Handler<PaymentAuthorized> for ConnectionManager {
             msg.customer_id, msg.amount
         ));
 
-        if let Some(customer) = self.customers.get(&msg.customer_id) {
-            customer.address.do_send(PushNotification {
+        if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            customer_adress.do_send(PushNotification {
                 notification_msg: format!(
                     "Payment of {} authorized for your order at {}",
                     msg.amount, msg.restaurant_name
@@ -343,12 +403,12 @@ impl Handler<PaymentDenied> for ConnectionManager {
             msg.customer_id, msg.amount
         ));
 
-        if let Some(customer) = self.customers.get(&msg.customer_id) {
+        if let Some(customer_address) = self.customer_connections.get(&msg.customer_id) {
             let reason_msg = format!(
                 "Payment of {} denied for your order at {}.",
                 msg.amount, msg.restaurant_name
             );
-            customer.address.do_send(FinishDelivery {
+            customer_address.do_send(FinishDelivery {
                 reason: reason_msg.clone(),
             });
         } else {
@@ -370,6 +430,13 @@ impl Handler<OrderRequest> for ConnectionManager {
         ));
         if let Some(customer) = self.customers.get_mut(&msg.customer_id) {
             customer.order_price = Some(msg.order_price);
+            if let Some(peer) = &self.next_server_peer {
+                peer.do_send(UpdateCustomerData {
+                    customer_id: msg.customer_id,
+                    location: customer.location,
+                    order_price: customer.order_price,
+                })
+            }
         } else {
             self.logger
                 .warn("Failed to find customer data when preparing order");
@@ -396,9 +463,9 @@ impl Handler<SendNotification> for ConnectionManager {
             "Sending notification to customer {}: {}",
             msg.recipient_id, msg.message
         ));
-        match self.customers.get(&msg.recipient_id) {
-            Some(customer) => {
-                customer.address.do_send(PushNotification {
+        match self.customer_connections.get(&msg.recipient_id) {
+            Some(customer_adress) => {
+                customer_adress.do_send(PushNotification {
                     notification_msg: msg.message,
                 });
             }
@@ -414,10 +481,10 @@ impl Handler<OrderReady> for ConnectionManager {
     type Result = ResponseActFuture<Self, ()>;
 
     fn handle(&mut self, msg: OrderReady, ctx: &mut Self::Context) -> Self::Result {
-        if let Some(customer) = self.customers.get(&msg.customer_id) {
+        if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
             let notification_msg =
                 "Your order is ready! Finding a rider for you order...".to_string();
-            customer.address.do_send(PushNotification {
+            customer_adress.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });
 
@@ -438,8 +505,8 @@ impl Handler<OrderCancelled> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: OrderCancelled, _ctx: &mut Self::Context) -> Self::Result {
-        if let Some(customer) = self.customers.get(&msg.customer_id) {
-            customer.address.do_send(FinishDelivery {
+        if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            customer_adress.do_send(FinishDelivery {
                 reason: "Delivery cancelled due to lack of stock".to_string(),
             });
         } else {
@@ -487,13 +554,11 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
         msg: DeliveryOfferAccepted,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
-        match self.customers.get(&msg.customer_id) {
-            Some(customer) => {
+        match self.customer_connections.get(&msg.customer_id) {
+            Some(customer_adress) => {
                 let notification_msg =
                     format!("The rider {} will deliver your order", msg.rider_id);
-                customer
-                    .address
-                    .do_send(PushNotification { notification_msg });
+                customer_adress.do_send(PushNotification { notification_msg });
                 self.orders_in_process.insert(msg.rider_id, msg.customer_id);
             }
             None => {
@@ -514,12 +579,10 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
     ) -> Self::Result {
         match self.orders_in_process.get(&msg.rider_id) {
             Some(customer_id) => {
-                match self.customers.get(customer_id) {
-                    Some(customer) => {
+                match self.customer_connections.get(customer_id) {
+                    Some(customer_adress) => {
                         let notification_msg = "The rider is outside! Pick up the order".to_owned();
-                        customer
-                            .address
-                            .do_send(PushNotification { notification_msg });
+                        customer_adress.do_send(PushNotification { notification_msg });
                     }
 
                     None => {
@@ -588,9 +651,9 @@ impl Handler<PaymentExecuted> for ConnectionManager {
             msg.customer_id, msg.amount
         ));
 
-        if let Some(customer) = self.customers.get(&msg.customer_id) {
+        if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
             let reason_msg = format!("Payment successfully executed for order of {}.", msg.amount,);
-            customer.address.do_send(FinishDelivery {
+            customer_adress.do_send(FinishDelivery {
                 reason: reason_msg.clone(),
             });
         } else {
@@ -598,5 +661,27 @@ impl Handler<PaymentExecuted> for ConnectionManager {
                 .warn("Failed to find customer data when denying payment");
         }
         self.process_pending_requests();
+    }
+}
+
+impl Handler<UpdateCustomerData> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: UpdateCustomerData, _ctx: &mut Self::Context) -> Self::Result {
+        self.customers
+            .entry(msg.customer_id)
+            .and_modify(|data| {
+                data.location = msg.location;
+                data.order_price = msg.order_price
+            })
+            .or_insert(CustomerData {
+                location: msg.location,
+                order_price: msg.order_price,
+            });
+
+        self.logger.info(&format!(
+            "Updated customer {} with {:?} location and {:?} price",
+            msg.customer_id, msg.location, msg.order_price
+        ))
     }
 }

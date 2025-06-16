@@ -5,7 +5,7 @@ use crate::heartbeat::HeartbeatMonitor;
 use crate::messages::RegisterPeerServer;
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
-use common::configuration::Configuration;
+use common::configuration::{Configuration, SinglePedidosRustInfo};
 use common::constants::DEFAULT_PR_HOST;
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
@@ -97,7 +97,6 @@ impl Server {
             if id == self.id {
                 continue;
             }
-
             let port_for_peer = self.choose_port_for_peer()?;
             let tcp_connector = TcpConnector::new(port_for_peer, vec![port]);
             let stream = match tcp_connector.connect().await {
@@ -122,8 +121,6 @@ impl Server {
                     write_stream: Some(write_half),
                 }
                 .start();
-
-                self.logger.debug("Created ServerPeer");
 
                 ServerPeer {
                     tcp_sender,
@@ -166,7 +163,7 @@ impl Server {
             .info(&format!("Peer connected: {peer_sockaddr}"));
         let port = peer_sockaddr.port() as u32;
 
-        ServerPeer::create(|ctx| {
+        let new_peer = ServerPeer::create(|ctx| {
             let (read_half, write_half) = split(stream);
 
             ServerPeer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
@@ -176,8 +173,6 @@ impl Server {
             }
             .start();
 
-            self.logger.debug("Created ServerPeer");
-
             ServerPeer {
                 tcp_sender,
                 logger: Logger::new(Some(&format!("[PEER-{port}]"))),
@@ -185,6 +180,19 @@ impl Server {
                 connection_manager: self.connection_manager.clone(),
             }
         });
+
+        if let Some(SinglePedidosRustInfo { id, .. }) = self
+            .configuration
+            .pedidos_rust
+            .infos
+            .iter()
+            .find(|info| info.ports_for_peers.contains(&port))
+        {
+            self.connection_manager.do_send(RegisterPeerServer {
+                id: *id,
+                address: new_peer,
+            });
+        }
     }
 
     fn create_client_connection(&self, client_sockaddr: SocketAddr, stream: TcpStream) {

@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
 use common::protocol::Location;
@@ -37,6 +39,12 @@ pub struct RegisterPaymentSystem {
 pub struct RegisterPeerServer {
     pub id: u32,
     pub address: Addr<ServerPeer>,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct RegisterNextPeerServer {
+    pub id: u32,
 }
 
 #[derive(Message, Debug)]
@@ -113,4 +121,12 @@ pub struct FindRider {
 pub struct SendNotification {
     pub message: String,
     pub recipient_id: u32, // ID of the recipient aka receiver of the notification
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct UpdateCustomer {
+    pub customer_id: u32,
+    pub location: Location,
+    pub order_price: Option<f64>,
 }

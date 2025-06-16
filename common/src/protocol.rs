@@ -157,6 +157,14 @@ pub struct ElectionOk {}
 #[rtype(result = "()")]
 pub struct ElectionCoordinator {}
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct UpdateCustomerData {
+    pub customer_id: u32,
+    pub location: Location,
+    pub order_price: Option<f64>,
+}
+
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -190,4 +198,5 @@ pub enum SocketMessage {
     ElectionCall,
     ElectionOk,
     ElectionCoordinator,
+    UpdateCustomerData(u32, Location, Option<f64>),
 }

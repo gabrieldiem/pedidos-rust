@@ -1,7 +1,9 @@
 use crate::connection_manager::ConnectionManager;
 use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
 use actix_async_handler::async_handler;
-use common::protocol::{ElectionCall, ElectionCoordinator, ElectionOk, SocketMessage};
+use common::protocol::{
+    ElectionCall, ElectionCoordinator, ElectionOk, SocketMessage, UpdateCustomerData,
+};
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
@@ -45,6 +47,15 @@ impl Handler<ElectionCoordinator> for ServerPeer {
     }
 }
 
+#[async_handler]
+impl Handler<UpdateCustomerData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, msg: UpdateCustomerData, _ctx: &mut Self::Context) -> Self::Result {
+        self.connection_manager.do_send(msg)
+    }
+}
+
 impl ServerPeer {
     #[allow(unreachable_patterns)]
     fn dispatch_message(&mut self, line_read: String, ctx: &mut <ServerPeer as Actor>::Context) {
@@ -57,6 +68,13 @@ impl ServerPeer {
                 }
                 SocketMessage::ElectionCoordinator => {
                     ctx.address().do_send(ElectionCoordinator {});
+                }
+                SocketMessage::UpdateCustomerData(customer_id, location, order_price) => {
+                    ctx.address().do_send(UpdateCustomerData {
+                        customer_id,
+                        location,
+                        order_price,
+                    })
                 }
                 _ => {
                     self.logger
