@@ -5,7 +5,7 @@ use crate::messages::{
     PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterPaymentSystem,
     RegisterPeerServer, RegisterRestaurant, RegisterRider, RemoveOrderInProgressData,
     SendNotification, SendRestaurantList, StartHeartbeat, UpdateCustomerData,
-    UpdateOrderInProgressData, UpdateRestaurantData,
+    UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -14,7 +14,11 @@ use actix_async_handler::async_handler;
 use common::configuration::Configuration;
 use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
-    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted, DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer, SendRemoveOrderInProgressData, SendUpdateCustomerData, SendUpdateOrderInProgressData, SendUpdateRestaurantData
+    AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
+    DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
+    Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants,
+    RiderArrivedAtCustomer, SendRemoveOrderInProgressData, SendUpdateCustomerData,
+    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -379,6 +383,12 @@ impl Handler<RegisterRider> for ConnectionManager {
         self.riders.entry(msg.id).or_insert(RiderData {
             location: Some(msg.location),
         });
+        if let Some((_, peer)) = &self.next_server_peer {
+            peer.do_send(SendUpdateRiderData {
+                rider_id: msg.id,
+                location: Some(msg.location),
+            });
+        }
         self.process_pending_requests();
     }
 }
@@ -905,8 +915,13 @@ impl Handler<LocationUpdateForRider> for ConnectionManager {
                 msg.rider_id
             ));
         }
+        if let Some((_, peer)) = &self.next_server_peer {
+            peer.do_send(SendUpdateRiderData {
+                rider_id: msg.rider_id,
+                location: Some(msg.new_location),
+            });
+        }
     }
-
 }
 
 #[async_handler]
@@ -1118,6 +1133,40 @@ impl Handler<RemoveOrderInProgressData> for ConnectionManager {
         self.logger.info(&format!(
             "Removed order in progress for customer {}",
             msg.customer_id
+        ));
+
+        self.process_pending_requests();
+    }
+}
+
+impl Handler<UpdateRiderData> for ConnectionManager {
+    type Result = ();
+
+    fn handle(&mut self, msg: UpdateRiderData, _ctx: &mut Self::Context) -> Self::Result {
+        self.riders
+            .entry(msg.rider_id)
+            .and_modify(|data| {
+                data.location = msg.location;
+            })
+            .or_insert(RiderData {
+                location: msg.location,
+            });
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendUpdateRiderData {
+                        rider_id: msg.rider_id,
+                        location: msg.location,
+                    });
+                }
+            }
+        };
+
+        self.logger.info(&format!(
+            "Updated rider data {} to location {:?}",
+            msg.rider_id, msg.location
         ));
 
         self.process_pending_requests();

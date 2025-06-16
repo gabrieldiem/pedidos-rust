@@ -2,7 +2,7 @@ use crate::connection_manager::{ConnectionManager, LeaderData, PeerId};
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GetPeers, LivenessEcho,
     LivenessProbe, PeerDisconnected, RemoveOrderInProgressData, StartHeartbeat, UpdateCustomerData,
-    UpdateRestaurantData,
+    UpdateRestaurantData, UpdateRiderData,
 };
 use actix::{
     Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, StreamHandler,
@@ -12,7 +12,8 @@ use actix_async_handler::async_handler;
 use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
     ElectionCall, ElectionCoordinator, ElectionOk, SendRemoveOrderInProgressData,
-    SendUpdateCustomerData, SendUpdateOrderInProgressData, SendUpdateRestaurantData, SocketMessage,
+    SendUpdateCustomerData, SendUpdateOrderInProgressData, SendUpdateRestaurantData,
+    SendUpdateRiderData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -372,6 +373,20 @@ impl Handler<SendUpdateRestaurantData> for ServerPeer {
 }
 
 #[async_handler]
+impl Handler<SendUpdateRiderData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, msg: SendUpdateRiderData, _ctx: &mut Self::Context) -> Self::Result {
+        if let Err(e) =
+            self.send_message(&SocketMessage::UpdateRiderData(msg.rider_id, msg.location))
+        {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<SendUpdateOrderInProgressData> for ServerPeer {
     type Result = ();
 
@@ -466,6 +481,12 @@ impl ServerPeer {
                         restaurant_name,
                         location,
                     })
+                }
+                SocketMessage::UpdateRiderData(rider_id, location) => {
+                    self.logger
+                        .info(&format!("Updating data for rider {rider_id}"));
+                    self.connection_manager
+                        .do_send(UpdateRiderData { rider_id, location })
                 }
                 SocketMessage::RemoveOrderInProgressData(customer_id) => {
                     self.logger.info(&format!(

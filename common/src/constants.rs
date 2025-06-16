@@ -7,7 +7,7 @@ pub const DEFAULT_PAYMENT_PORT: u32 = 9000;
 
 pub const MIN_ORDER_DURATION: u64 = 1; // In seconds
 pub const MAX_ORDER_DURATION: u64 = 10; // In seconds
-pub const PAYMENT_REJECTED_PROBABILITY: f32 = 0.0;  //MODIFY
+pub const PAYMENT_REJECTED_PROBABILITY: f32 = 0.0; //MODIFY
 pub const ORDER_REJECTED_PROBABILITY: f32 = 0.0;
 pub const PAYMENT_DURATION: u64 = 1; // In seconds
 

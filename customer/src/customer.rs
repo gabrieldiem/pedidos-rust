@@ -11,9 +11,9 @@ use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
-use rand::{rng, thread_rng, Rng};
-use std::io;
 use rand::seq::IndexedRandom;
+use rand::{Rng, rng, thread_rng};
+use std::io;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio_stream::wrappers::LinesStream;
 
