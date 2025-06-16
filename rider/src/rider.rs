@@ -2,8 +2,13 @@ use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
-use common::constants::{DELIVERY_ACCEPT_PROBABILITY, MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS};
-use common::protocol::{DeliveryOffer, DeliveryOfferConfirmed, FinishDelivery, GetRestaurants, Location, LocationUpdate, Order, OrderContent, PushNotification, SocketMessage, Stop};
+use common::constants::{
+    DELIVERY_ACCEPT_PROBABILITY, MAX_ORDER_PRICE, MIN_ORDER_PRICE, NO_RESTAURANTS,
+};
+use common::protocol::{
+    DeliveryOffer, DeliveryOfferConfirmed, FinishDelivery, GetRestaurants, Location,
+    LocationUpdate, Order, OrderContent, PushNotification, SocketMessage, Stop,
+};
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -16,7 +21,6 @@ use tokio::io::{AsyncBufReadExt, BufReader, split};
 use tokio::time::sleep;
 use tokio_stream::wrappers::LinesStream;
 
-
 #[allow(dead_code)]
 pub struct Rider {
     tcp_sender: Addr<TcpSender>,
@@ -28,7 +32,7 @@ pub struct Rider {
     tcp_connector: Addr<TcpConnector>,
     customer_location: Option<Location>,
     busy: bool,
-    customer_id: Option<u32>
+    customer_id: Option<u32>,
 }
 
 impl Actor for Rider {
@@ -183,10 +187,7 @@ impl Handler<DeliveryOfferConfirmed> for Rider {
 }
 
 impl Rider {
-    pub async fn new(
-        id: u32,
-        logger: Logger,
-    ) -> Result<Addr<Rider>, Box<dyn std::error::Error>> {
+    pub async fn new(id: u32, logger: Logger) -> Result<Addr<Rider>, Box<dyn std::error::Error>> {
         logger.info("Starting...");
 
         // Setting up ports
@@ -223,7 +224,7 @@ impl Rider {
             let tcp_sender = TcpSender {
                 write_stream: Some(write_half),
             }
-                .start();
+            .start();
 
             logger.debug("Created Rider");
 
