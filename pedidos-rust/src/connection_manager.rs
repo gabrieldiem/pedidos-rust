@@ -1,10 +1,9 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
-    IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    PaymentDenied, PaymentExecuted, PeerDisconnected, RegisterCustomer, RegisterNextPeerServer,
-    RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider, SendNotification,
-    SendRestaurantList, StartHeartbeat,
+    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
+    PaymentExecuted, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
+    RegisterRestaurant, RegisterRider, SendNotification, SendRestaurantList, UpdateCustomerData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -16,7 +15,7 @@ use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
     Location, OrderToRestaurant, PushNotification, Restaurants, RiderArrivedAtCustomer,
-    UpdateCustomerData,
+    SendUpdateCustomerData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -33,7 +32,6 @@ pub struct LeaderData {
 
 #[derive(Debug, Clone)]
 pub struct RiderData {
-    pub address: Addr<ClientConnection>,
     pub location: Option<Location>,
 }
 
@@ -83,8 +81,9 @@ pub struct ConnectionManager {
 
     // Entities
     pub customer_connections: HashMap<CustomerId, Addr<ClientConnection>>,
-    pub riders: HashMap<RiderId, RiderData>,
     pub customers: HashMap<CustomerId, CustomerData>,
+    pub rider_connections: HashMap<RiderId, Addr<ClientConnection>>,
+    pub riders: HashMap<RiderId, RiderData>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
 
@@ -92,7 +91,7 @@ pub struct ConnectionManager {
     pub pending_delivery_requests: VecDeque<FindRider>,
 
     // Peers
-    pub next_server_peer: Option<Addr<ServerPeer>>,
+    pub next_server_peer: Option<(PeerId, Addr<ServerPeer>)>,
     pub server_peers: HashMap<PeerId, Addr<ServerPeer>>,
     pub leader: Option<LeaderData>,
     pub election_in_progress: bool,
@@ -105,6 +104,7 @@ impl ConnectionManager {
             port,
             configuration,
             logger: Logger::new(Some("[CONNECTION-MANAGER]")),
+            rider_connections: HashMap::new(),
             riders: HashMap::new(),
             customer_connections: HashMap::new(),
             customers: HashMap::new(),
@@ -121,12 +121,12 @@ impl ConnectionManager {
 
     fn process_pending_requests(&mut self) {
         while let Some(pending_request) = self.pending_delivery_requests.pop_front() {
-            if let Some(rider) = self.riders.values().find(|_rider| true) {
+            if let Some(rider_adress) = self.rider_connections.values().find(|_rider| true) {
                 self.logger
                     .debug("Assigned pending delivery request to newly registered rider");
                 match self.customers.get(&pending_request.customer_id) {
                     Some(customer) => {
-                        rider.address.do_send(DeliveryOffer {
+                        rider_adress.do_send(DeliveryOffer {
                             customer_id: pending_request.customer_id,
                             customer_location: customer.location,
                         });
@@ -342,28 +342,6 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
 }
 
 #[async_handler]
-impl Handler<RegisterNextPeerServer> for ConnectionManager {
-    type Result = ();
-
-    async fn handle(
-        &mut self,
-        msg: RegisterNextPeerServer,
-        _ctx: &mut Self::Context,
-    ) -> Self::Result {
-        self.logger
-            .debug(&format!("Registering server peer with ID {}", msg.id));
-        match self.server_peers.get(&msg.id) {
-            Some(address) => self.next_server_peer = Some(address.clone()),
-            None => {
-                self.logger
-                    .info(&format!("Failed choosing {} as next server peer ", msg.id));
-            }
-        }
-        self.process_pending_requests();
-    }
-}
-
-#[async_handler]
 impl Handler<IsPeerConnected> for ConnectionManager {
     type Result = Result<bool, ()>;
 
@@ -394,8 +372,8 @@ impl Handler<RegisterRider> for ConnectionManager {
     async fn handle(&mut self, msg: RegisterRider, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Rider with ID {}", msg.id));
+        self.rider_connections.entry(msg.id).or_insert(msg.address);
         self.riders.entry(msg.id).or_insert(RiderData {
-            address: msg.address,
             location: Some(msg.location),
         });
         self.process_pending_requests();
@@ -415,12 +393,12 @@ impl Handler<RegisterCustomer> for ConnectionManager {
         self.customer_connections
             .entry(msg.id)
             .or_insert(msg.address);
-        if let Some(peer) = &self.next_server_peer {
-            peer.do_send(UpdateCustomerData {
+        if let Some((_, peer)) = &self.next_server_peer {
+            peer.do_send(SendUpdateCustomerData {
                 customer_id: msg.id,
                 location: msg.location,
                 order_price: None,
-            })
+            });
         }
         self.process_pending_requests();
     }
@@ -521,7 +499,14 @@ impl Handler<AuthorizePayment> for ConnectionManager {
         } else {
             self.logger
                 .warn("Failed to find payment system when authorizing payment");
-            // TODO: FinishDelivery al customer con el mensaje de que no anda el sistema de pago y lo vuelva a intentar mas tarde
+            if let Some(customer_address) = self.customer_connections.get(&msg.customer_id) {
+                customer_address.do_send(FinishDelivery {
+                    reason: "Payment system is not available, please try again later.".to_string(),
+                });
+            } else {
+                self.logger
+                    .warn("Failed to find customer data when authorizing payment");
+            }
         }
         self.process_pending_requests();
     }
@@ -596,7 +581,7 @@ impl Handler<OrderRequest> for ConnectionManager {
         ));
         if let Some(customer) = self.customers.get_mut(&msg.customer_id) {
             customer.order_price = Some(msg.order_price);
-            if let Some(peer) = &self.next_server_peer {
+            if let Some((_, peer)) = &self.next_server_peer {
                 peer.do_send(UpdateCustomerData {
                     customer_id: msg.customer_id,
                     location: customer.location,
@@ -684,16 +669,15 @@ impl Handler<OrderReady> for ConnectionManager {
     }
 }
 
-/// TODO: eliminar la entrada de orders_in_process (ademas de la de pending_delivery_requests) para el
-/// customer en todos los casos donde se envia FinishDelivery
 #[async_handler]
 impl Handler<OrderCancelled> for ConnectionManager {
     type Result = ();
 
     async fn handle(&mut self, msg: OrderCancelled, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            self.orders_in_process.remove(&msg.customer_id);
             customer_adress.do_send(FinishDelivery {
-                reason: "Delivery cancelled due to lack of stock".to_string(),
+                reason: "Order cancelled by the restaurant due to lack of stock".to_string(),
             });
         } else {
             self.logger
@@ -702,8 +686,6 @@ impl Handler<OrderCancelled> for ConnectionManager {
     }
 }
 
-// any rider will do
-// TODO: bug when connecting multiple riders, given that only one is gotten
 #[async_handler]
 impl Handler<FindRider> for ConnectionManager {
     type Result = ();
@@ -721,6 +703,7 @@ impl Handler<FindRider> for ConnectionManager {
         let closest = NearbyEntities::closest_riders(
             &msg.restaurant_location,
             &self.riders,
+            &self.rider_connections,
             N_RIDERS_TO_NOTIFY,
         );
 
@@ -785,8 +768,8 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
                 } else {
                     // Asignar el rider y confirmar la oferta
                     order_data.rider_id = Some(msg.rider_id);
-                    if let Some(rider) = self.riders.get(&msg.rider_id) {
-                        rider.address.do_send(DeliveryOfferConfirmed {
+                    if let Some(rider_address) = self.rider_connections.get(&msg.rider_id) {
+                        rider_address.do_send(DeliveryOfferConfirmed {
                             customer_id: msg.customer_id,
                             customer_location: order_data.customer_location,
                         });
@@ -900,6 +883,7 @@ impl Handler<PaymentExecuted> for ConnectionManager {
         ));
 
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+            self.orders_in_process.remove(&msg.customer_id);
             let reason_msg = format!("Payment successfully executed for order of {}.", msg.amount,);
             customer_adress.do_send(FinishDelivery {
                 reason: reason_msg.clone(),
@@ -926,6 +910,19 @@ impl Handler<UpdateCustomerData> for ConnectionManager {
                 location: msg.location,
                 order_price: msg.order_price,
             });
+        if let Some(LeaderData { id: leader_id, .. }) = self.leader {
+            if let Some((next_peer_id, peer)) = &self.next_server_peer {
+                if !(leader_id == *next_peer_id) {
+                    self.logger
+                        .info(&format!("Update being sent to {next_peer_id}",));
+                    peer.do_send(SendUpdateCustomerData {
+                        customer_id: msg.customer_id,
+                        location: msg.location,
+                        order_price: msg.order_price,
+                    });
+                }
+            }
+        };
 
         self.logger.info(&format!(
             "Updated customer {} with {:?} location and {:?} price",

@@ -145,9 +145,9 @@ pub struct SendNotification {
     pub recipient_id: u32, // ID of the recipient aka receiver of the notification
 }
 
-#[derive(Message, Debug)]
+#[derive(Message, Debug, Clone)]
 #[rtype(result = "()")]
-pub struct UpdateCustomer {
+pub struct UpdateCustomerData {
     pub customer_id: u32,
     pub location: Location,
     pub order_price: Option<f64>,

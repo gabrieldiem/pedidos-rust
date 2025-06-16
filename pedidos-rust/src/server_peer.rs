@@ -10,7 +10,7 @@ use actix::{
 use actix_async_handler::async_handler;
 use common::constants::DEFAULT_PR_HOST;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SocketMessage, UpdateCustomerData,
+    ElectionCall, ElectionCoordinator, ElectionOk, SendUpdateCustomerData, SocketMessage,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -339,6 +339,26 @@ impl Handler<UpdateCustomerData> for ServerPeer {
     }
 }
 
+#[async_handler]
+impl Handler<SendUpdateCustomerData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdateCustomerData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdateCustomerData(
+            msg.customer_id,
+            msg.location,
+            msg.order_price,
+        )) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
 impl ServerPeer {
     pub const HEARTBEAT_DELAY_IN_SECS: u64 = 3;
     pub const HEARTBEAT_LONG_DELAY_IN_SECS: u64 = 5;
@@ -380,7 +400,9 @@ impl ServerPeer {
                     });
                 }
                 SocketMessage::UpdateCustomerData(customer_id, location, order_price) => {
-                    ctx.address().do_send(UpdateCustomerData {
+                    self.logger
+                        .info(&format!("Updating data for customer {customer_id}"));
+                    self.connection_manager.do_send(UpdateCustomerData {
                         customer_id,
                         location,
                         order_price,
