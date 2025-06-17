@@ -1,6 +1,9 @@
 use crate::connection_manager::ConnectionManager;
 use crate::messages::{
-    ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GotLeaderFromPeer, PeerDisconnected, PopPendingDeliveryRequest, PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData, UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData
+    ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GotLeaderFromPeer,
+    PeerDisconnected, PopPendingDeliveryRequest, PushPendingDeliveryRequest,
+    RemoveOrderInProgressData, UpdateCustomerData, UpdateOrderInProgressData, UpdateRestaurantData,
+    UpdateRiderData,
 };
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
