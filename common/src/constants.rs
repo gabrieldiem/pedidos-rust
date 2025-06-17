@@ -12,10 +12,10 @@ pub const ORDER_REJECTED_PROBABILITY: f32 = 0.1;
 pub const PAYMENT_DURATION: u64 = 1; // In seconds
 
 pub const NO_RESTAURANTS: &str = "No hay restaurantes disponibles";
-pub const MAX_DISTANCE_RESTAURANTS: u32 = 10;
+pub const MAX_DISTANCE_RESTAURANTS: u32 = 20;
 pub const MIN_ORDER_PRICE: f64 = 5.0;
 pub const MAX_ORDER_PRICE: f64 = 100.0;
 pub const N_RIDERS_TO_NOTIFY: usize = 2;
-pub const DELIVERY_ACCEPT_PROBABILITY: f32 = 0.5;
+pub const DELIVERY_ACCEPT_PROBABILITY: f32 = 0.9;
 
 pub const NOT_A_PEER_PORT: u32 = 0;
