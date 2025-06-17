@@ -830,8 +830,7 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
             .entry(msg.name.clone())
             .or_insert(RestaurantData::new(msg.location));
         self.restaurant_connections
-            .entry(msg.name.clone())
-            .or_insert(msg.address);
+            .insert(msg.name.clone(), msg.address);
 
         self.send_message_to_next_peer(SendUpdateRestaurantData {
             restaurant_name: msg.name,
