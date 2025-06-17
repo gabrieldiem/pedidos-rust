@@ -182,6 +182,9 @@ impl Handler<SetupReconnection> for Customer {
 
         self.logger.info("Reconnection established");
         self.is_new_customer = true;
+        _ctx.address().do_send(GetRestaurants {
+            customer_location: self.location,
+        });
     }
 }
 
