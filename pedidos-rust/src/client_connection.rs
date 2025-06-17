@@ -353,7 +353,7 @@ impl ClientConnection {
         let parsed_line = serde_json::from_str(&line_read);
         match parsed_line {
             Ok(message) => match message {
-                /// TODO: que a un new customer lo registre, a uno viejo solo le envia los restaurantes
+                // TODO: que a un new customer lo registre, a uno viejo solo le envia los restaurantes
                 SocketMessage::GetRestaurants(customer_location, is_new_customer) => {
                     self.logger.debug("Got request for GetRestaurants");
                     ctx.address().do_send(SendRestaurants {

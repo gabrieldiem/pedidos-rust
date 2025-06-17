@@ -23,24 +23,41 @@ use common::protocol::{
     SendUpdateRestaurantData, SendUpdateRiderData,
 };
 use common::utils::logger::Logger;
-use futures::stream::TryChunksError;
 use std::collections::{HashMap, VecDeque};
 
 type CustomerId = u32;
 type RiderId = u32;
 type RestaurantName = String;
 
+/// `LeaderData` holds the information about the Leader of the PedidosRust instances.
+///
+/// Contains the ID of the leading replica and its port.
 #[derive(Debug, Clone)]
 pub struct LeaderData {
     pub id: u32,
     pub port: u32,
 }
 
+/// `RiderData` holds the information about a rider.
+///
+/// This struct is used to represent details for a rider, including their location.
+/// The `location` field is optional, which allows you to represent cases where the
+/// rider's location might be temporarily unavailable or unknown.
 #[derive(Debug, Clone)]
 pub struct RiderData {
+    /// The current location of the rider.
+    ///
+    /// This field uses an `Option` to indicate that a location may or may not be present.
+    /// When set to `Some(location)`, it represents the rider's coordinate via a `Location` struct.
+    /// When set to `None`, it indicates that the location is unknown. This usually happens when the
+    /// rider has been created but has not connected entirely with the manager.
     pub location: Option<Location>,
 }
 
+/// `OrderData` holds the information about current, unfinished orders.
+///
+/// Contains the ID of the Rider and of the Customer, the order price if it has been
+/// set, and the location of the Customer
 #[derive(Debug, Clone, Copy)]
 pub struct OrderData {
     pub rider_id: Option<RiderId>,
@@ -49,12 +66,20 @@ pub struct OrderData {
     pub customer_id: CustomerId,
 }
 
+/// `CustomerData` holds the information about customers waiting for an order to be
+/// delivered.
+///
+/// Contains the location of the customer and the order price, if it has been set
 #[derive(Debug, Clone)]
 pub struct CustomerData {
     pub location: Location,
     pub order_price: Option<f64>,
 }
 
+/// `CustomerData` holds the information about customers waiting for an order to be
+/// delivered.
+///
+/// Contains the location of the customer and the order price, if it has been set
 impl CustomerData {
     pub fn new(location: Location, order_price: Option<f64>) -> CustomerData {
         CustomerData {
@@ -64,7 +89,9 @@ impl CustomerData {
     }
 }
 
-#[allow(dead_code)]
+/// `RestaurantData` holds the information about restaurants
+///
+/// Contains the location of the restaurant.
 #[derive(Debug, Clone)]
 pub struct RestaurantData {
     pub location: Location,
@@ -78,6 +105,43 @@ impl RestaurantData {
 
 pub type PeerId = u32;
 
+/// Manages all the client connections and inter-server communications, and holds
+/// the current data of the system
+///
+/// The `ConnectionManager` is responsible for:
+/// * Maintaining connections with customers, riders, restaurants, and payment systems.
+/// * Handling orders in process and pending delivery requests.
+/// * Managing peer servers for a distributed system, including leader election.
+///
+/// # Fields
+///
+/// * `logger` - A logger instance used for logging debug, info, and warning messages.
+/// * `id` - The unique identifier for the connection manager.
+/// * `port` - The port on which the connection manager listens.
+/// * `configuration` - Application configuration parameters relevant to the connection manager.
+///
+/// ## Entities
+///
+/// * `customer_connections` - A mapping of customer IDs to their associated client connection actor addresses.
+/// * `customers` - A mapping of customer IDs to `CustomerData`.
+/// * `rider_connections` - A mapping of rider IDs to their associated client connection actor addresses.
+/// * `riders` - A mapping of rider IDs to `RiderData`.
+/// * `restaurant_connections` - A mapping of restaurant names to their associated client connection actor addresses.
+/// * `restaurants` - A mapping of restaurant names to `RestaurantData`.
+/// * `payment_system` - An optional address for the payment system client connection.
+///
+/// ## Orders and Requests
+///
+/// * `orders_in_process` - A mapping of customer IDs to `OrderData` for orders currently in process.
+/// * `pending_delivery_requests` - A queue of pending delivery requests to be processed.
+///
+/// ## Server Peers
+///
+/// * `next_server_peer` - Information about the next peer server in the network (if any). Used for data transfers
+///   between replicas of the PedidosRust application.
+/// * `server_peers` - A mapping of peer IDs to their associated server peer actor addresses.
+/// * `leader` - Information about the current leader server (if any).
+/// * `election_in_progress` - A flag indicating whether a leader election is currently underway.
 pub struct ConnectionManager {
     pub logger: Logger,
     pub id: u32,
@@ -126,6 +190,18 @@ impl ConnectionManager {
         }
     }
 
+    /// Processes pending delivery requests.
+    ///
+    /// This method iterates through the `pending_delivery_requests` queue and:
+    ///
+    /// 1. If a `next_server_peer` exists, forwards a notification using `SendPopPendingDeliveryRequest`.
+    /// 2. Finds a registered rider connection to assign the delivery request.
+    /// 3. If a corresponding customer exists, sends a `DeliveryOffer` message to the rider.
+    /// 4. If no rider is available, requeues the delivery request and notifies the peer via
+    ///    `SendPushPendingDeliveryRequest`.
+    ///
+    /// The method stops processing as soon as it cannot assign a pending request, ensuring that
+    /// no delivery request is lost.
     fn process_pending_requests(&mut self) {
         while let Some(pending_request) = self.pending_delivery_requests.pop_front() {
             if let Some((_, peer)) = &self.next_server_peer {
@@ -212,19 +288,25 @@ impl Handler<StartHeartbeat> for ConnectionManager {
     type Result = ();
 
     fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
+        if self.server_peers.is_empty() {
+            self.logger.info("No peer connection. Taking leader role");
+            _ctx.address().do_send(ElectionCoordinatorReceived {
+                leader_port: self.port,
+            });
+            return;
+        }
+
         for peer_id in self.server_peers.keys() {
-            if *peer_id > self.id {
-                match self.server_peers.get(peer_id) {
-                    Some(peer_addr) => {
-                        peer_addr.do_send(StartHeartbeat {
-                            udp_socket: msg.udp_socket.clone(),
-                        });
-                    }
-                    None => {
-                        self.logger.warn("No peer found");
-                    }
-                };
-            }
+            match self.server_peers.get(peer_id) {
+                Some(peer_addr) => {
+                    peer_addr.do_send(StartHeartbeat {
+                        udp_socket: msg.udp_socket.clone(),
+                    });
+                }
+                None => {
+                    self.logger.warn("No peer found");
+                }
+            };
         }
     }
 }
@@ -653,7 +735,7 @@ impl Handler<OrderRequest> for ConnectionManager {
                 .info(&format!("Update being sent to {next_peer_id}",));
             peer.do_send(SendUpdateOrderInProgressData {
                 customer_id: msg.customer_id,
-                customer_location: customer_location,
+                customer_location,
                 order_price: Some(msg.order_price),
                 rider_id: None,
             });
@@ -1037,7 +1119,7 @@ impl Handler<UpdateCustomerData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateCustomerData {
@@ -1072,7 +1154,7 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateRestaurantData {
@@ -1106,7 +1188,7 @@ impl Handler<UpdateRiderData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateRiderData {
@@ -1131,7 +1213,7 @@ impl Handler<UpdateOrderInProgressData> for ConnectionManager {
 
     fn handle(&mut self, msg: UpdateOrderInProgressData, _ctx: &mut Self::Context) -> Self::Result {
         self.orders_in_process
-            .entry(msg.customer_id.clone())
+            .entry(msg.customer_id)
             .and_modify(|data| {
                 data.customer_id = msg.customer_id;
                 data.customer_location = msg.customer_location;
@@ -1146,7 +1228,7 @@ impl Handler<UpdateOrderInProgressData> for ConnectionManager {
             });
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendUpdateOrderInProgressData {
@@ -1175,7 +1257,7 @@ impl Handler<RemoveOrderInProgressData> for ConnectionManager {
         self.orders_in_process.remove(&msg.customer_id);
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendRemoveOrderInProgressData {
@@ -1215,7 +1297,7 @@ impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
         }
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendPushPendingDeliveryRequest {
@@ -1239,11 +1321,15 @@ impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
 impl Handler<PopPendingDeliveryRequest> for ConnectionManager {
     type Result = ();
 
-    fn handle(&mut self, msg: PopPendingDeliveryRequest, _ctx: &mut Self::Context) -> Self::Result {
+    fn handle(
+        &mut self,
+        _msg: PopPendingDeliveryRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
         let popped = self.pending_delivery_requests.pop_front();
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
-                if !(leader_id == *next_peer_id) {
+                if leader_id != *next_peer_id {
                     self.logger
                         .info(&format!("Update being sent to {next_peer_id}",));
                     peer.do_send(SendPopPendingDeliveryRequest {});

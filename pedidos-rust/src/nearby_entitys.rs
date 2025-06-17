@@ -74,7 +74,7 @@ impl NearbyEntities {
         n: usize,
     ) -> Vec<&'a actix::Addr<ClientConnection>> {
         let mut riders_with_distance: Vec<_> = riders
-            .into_iter()
+            .iter()
             .filter_map(|(rider_id, rider_data)| {
                 rider_data.location.map(|loc| {
                     let dist = Self::manhattan_distance(&loc, target_location);
