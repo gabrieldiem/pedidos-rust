@@ -4,12 +4,13 @@ use crate::messages::{
     PeerDisconnected, PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData,
     UpdateRestaurantData, UpdateRiderData,
 };
-use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
     ElectionCall, ElectionCoordinator, ElectionOk, LeaderQuery, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
     SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
+    Stop,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -41,6 +42,22 @@ pub struct ServerPeer {
     pub host_id: u32,
     pub connection_manager: Addr<ConnectionManager>,
     pub udp_socket: Option<Arc<UdpSocket>>,
+}
+
+#[allow(clippy::unused_unit)]
+#[async_handler]
+impl Handler<Stop> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: Stop, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug("Stopping peer");
+        if self.tcp_sender.connected() {
+            self.logger.debug("Stopping TCP sender of peer");
+            let _ = self.tcp_sender.send(Stop {}).await;
+        }
+        self.udp_socket = None;
+        _ctx.stop();
+    }
 }
 
 #[async_handler]

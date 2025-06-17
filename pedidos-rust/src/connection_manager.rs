@@ -20,7 +20,7 @@ use common::protocol::{
     LeaderQuery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification,
     Restaurants, RiderArrivedAtCustomer, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
-    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData,
+    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, Stop,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -241,7 +241,7 @@ impl ConnectionManager {
     where
         M: actix::Message + Send + 'static,
         <M as actix::Message>::Result: Send,
-        ServerPeer: actix::Handler<M>,
+        ServerPeer: Handler<M>,
     {
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
@@ -255,6 +255,32 @@ impl ConnectionManager {
                 }
             }
         };
+    }
+
+    fn update_next_peer(&mut self) {
+        if self.server_peers.is_empty() {
+            self.logger
+                .debug("No next server peer because there are no peers");
+            self.next_server_peer = None;
+            return;
+        }
+
+        let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) =
+            self.server_peers.keys().partition(|&n| *n <= self.id);
+
+        let updated_next_peer_id: &u32 = if greater_peers.is_empty() {
+            lesser_peers.iter().min().unwrap_or(&&0)
+        } else {
+            greater_peers.iter().min().unwrap_or(&&0)
+        };
+
+        self.next_server_peer = Some((
+            *updated_next_peer_id,
+            self.server_peers.get(updated_next_peer_id).unwrap().clone(),
+        ));
+        self.logger.info(&format!(
+            "Updated next peer server to peer no {updated_next_peer_id}"
+        ));
     }
 }
 
@@ -307,6 +333,35 @@ impl Handler<PeerDisconnected> for ConnectionManager {
         let peer_id = msg.peer_id;
         self.logger
             .warn(&format!("Peer with id {peer_id} disconnected"));
+        let mut was_disconnected_peer_the_leader = false;
+
+        if let Some(leader_data) = self.leader.clone() {
+            if leader_data.id == peer_id {
+                was_disconnected_peer_the_leader = true;
+            }
+        }
+
+        match self.server_peers.remove(&peer_id) {
+            Some(peer_addr) => {
+                peer_addr.do_send(Stop {});
+                self.logger
+                    .debug(&format!("Removed peer with id {peer_id}"));
+            }
+            None => {
+                self.logger
+                    .debug(&format!("No peer connection with id {peer_id}"));
+            }
+        }
+
+        if was_disconnected_peer_the_leader && self.server_peers.is_empty() {
+            // There is no one so I will be the leader
+            _ctx.address().do_send(InitLeader {});
+        } else if was_disconnected_peer_the_leader {
+            // There is at least one peer still so I call elections
+            _ctx.address().do_send(ElectionCall {});
+        }
+
+        self.update_next_peer();
     }
 }
 
@@ -456,22 +511,7 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
             .entry(msg.id)
             .or_insert(peer_address.clone());
 
-        let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) =
-            self.server_peers.keys().partition(|&n| *n <= self.id);
-
-        let updated_next_peer_id: &u32 = if greater_peers.is_empty() {
-            lesser_peers.iter().min().unwrap_or(&&0)
-        } else {
-            greater_peers.iter().min().unwrap_or(&&0)
-        };
-
-        self.next_server_peer = Some((
-            *updated_next_peer_id,
-            self.server_peers.get(updated_next_peer_id).unwrap().clone(),
-        ));
-        self.logger.info(&format!(
-            "Updated next peer server to peer no {updated_next_peer_id}"
-        ));
+        self.update_next_peer();
         self.process_pending_requests();
     }
 }
