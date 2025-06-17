@@ -262,32 +262,31 @@ Se muestra a continuación un diagrama de secuencia que representa el flujo de m
 Se presentan los mensajes que intercambian las aplicaciones para poder llevar a cabo el envío de pedidos de manera efectiva y resiliente:
 
 | Mensaje                   | Emisor                 | Receptor               | Payload                                                              | Propósito                                                                                                           |
-|---------------------------|------------------------|------------------------|----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
-| Get Restaurants           | Customer👨🏻‍🦱        | PedidosRust🦀          | `customer_location: Location` (`Location` son dos enteros `x` e `y`) | Solicitar restaurantes para realizar un pedido                                                                      |
-| Restaurants               | PedidosRust🦀          | Customer👨🏻‍🦱        | `data: String`                                                       | Comunicar los restaurantes disponibles                                                                              |
-| Order                     | Customer👨🏻‍🦱        | PedidosRust🦀          | `restaurant: String, amount: f64`                                    | Realizar un pedido                                                                                                  |
-| Push Notification         | PedidosRust🦀          | Customer👨🏻‍🦱        | `notification_msg: String`                                           | Envío de información para seguimiento en tiempo real del estado del pedido                                          |
+|---------------------------| ---------------------- | ---------------------- |----------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------|
+| Get Restaurants           | Customer👨🏻‍🦱             | PedidosRust🦀          | `customer_location: Location` (`Location` son dos enteros `x` e `y`) | Solicitar restaurantes para realizar un pedido                                                                      |
+| Restaurants               | PedidosRust🦀          | Customer👨🏻‍🦱             | `data: String`                                                       | Comunicar los restaurantes disponibles                                                                              |
+| Order                     | Customer👨🏻‍🦱             | PedidosRust🦀          | `restaurant: String, amount: f64`                                    | Realizar un pedido                                                                                                  |
+| Push Notification         | PedidosRust🦀          | Customer👨🏻‍🦱             | `notification_msg: String`                                           | Envío de información para seguimiento en tiempo real del estado del pedido                                          |
 | Location Update           | Rider🛵                | PedidosRust🦀          | `new_location: Location`                                             | Informar nueva ubicación                                                                                            |
-| Delivery Offer            | PedidosRust🦀          | Rider🛵                | `customer_id: u32`                                                   | Ofrecer un pedido al rider que puede aceptar o no                                                                   |
+| Delivery Offer            | PedidosRust🦀          | Rider🛵                | `customer_id: u32, customer_location: Location`                      | Ofrecer un pedido al rider que puede aceptar o no                                                                   |
 | Delivery Offer Accepted   | Rider🛵                | PedidosRust🦀          | `customer_id: u32, customer_location: Location`                      | Aceptar el ofrecimiento de pedido                                                                                   |
 | Delivery Offer Confirmed  | PedidosRust🦀          | Rider🛵                | `customer_id: u32, customer_location: Location`                      | Confirmar que el rider es el elegido para hacer el delivery                                                         |
 | Picked Up From Restaurant | Rider🛵                | PedidosRust🦀          | `rider_id: u32`                                                      | Informar que el rider ya hizo el retiro de la orden del restaurante                                                 |
 | Delivery Done             | Rider🛵                | PedidosRust🦀          | `rider_id: u32`                                                      | Informar que el rider llegó a la ubicación del customer y entregó el pedido                                         |
-| Delivery Done             | PedidosRust🦀          | Customer👨🏻‍🦱        |                                                                      | Realizar última actualización del pedido para marcar que se completó el mismo, y que el cliente pueda realizar otro |
-| Authorize Payment         | PedidosRust🦀          | PaymentSystem 💲       | `customer_id: u32, amount: f64, restaurant_name: String`             | Solicitar la autorización del pago                                                                                  |
-| Payment Authorized        | PaymentSystem 💲       | PedidosRust🦀          | `customer_id: u32, amount: f64, restaurant_name: String`                                      | Informar que el pago se autorizó exitosamente                                                                       |
-| Payment Denied            | PaymentSystem 💲       | PedidosRust🦀          | `customer_id: u32, amount: f64, restaurant_name: String`                                      | Informar que el pago no se pudo autorizar                                                                           |
-| Execute Payment           | PedidosRust🦀          | PaymentSystem 💲       | `customer_id: u32, amount: f64`                                      | Debitar/efectivizar el pago                                                                                         |
-| Payment Executed          | PaymentSystem 💲       | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el débito del pago fue exitoso                                                                         |
+| Finish Delivery           | PedidosRust🦀          | Customer👨🏻‍🦱             |                                                                      | Realizar última actualización del pedido para marcar que se completó el mismo, y que el cliente pueda realizar otro |
+| Authorize Payment         | PedidosRust🦀          | Payment 💲             | `customer_id: u32, amount: f64`                                      | Solicitar la autorización del pago                                                                                  |
+| Payment Authorized        | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago se autorizó exitosamente                                                                       |
+| Payment Denied            | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el pago no se pudo autorizar                                                                           |
+| Execute Payment           | PedidosRust🦀          | Payment 💲             | `customer_id: u32, amount: f64`                                      | Debitar/efectivizar el pago                                                                                         |
+| Payment Executed          | Payment 💲             | PedidosRust🦀          | `customer_id: u32, amount: f64`                                      | Informar que el débito del pago fue exitoso                                                                         |
  Order In Progress         | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Comenzar a preparar orden                                                                                           |
-| Prepare Order             | PedidosRust🦀          | Restaurant🍴           | `customer_id: u32, price: f64`                                       | Preparar orden para un customer                                                                                     |
-| Order Cancelled           | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | La orden fue cancelada debido a falta de stock                                                                      |
-| Inform Location           | Restaurant🍴           | PedidosRust🦀          | `restaurant_location: Location, name: String`                        | Informar posicion y nombre de restaurante nuevo                                                                     |
+| Prepare Order             | PedidosRust🦀          | Restaurant🍴           | `customer_id: u32, price: u64`                                       | Preparar orden para un customer                                                                                     |
+| Order In Progress         | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Comenzar a preparar orden                                                                                           |
+| Inform Location           | Restaurant🍴           | PedidosRust🦀          | `restaurant_location: Location`                                      | Informar su posición a PedidosRust                                                                                  |
 | Order Ready               | Restaurant🍴           | PedidosRust🦀          | `customer_id: u32`                                                   | Informar que la orden está lista para ser retirada                                                                  |
+| Rider Assigned            | PedidosRust🦀          | Restaurant🍴           | `rider_id: u32`                                                      | Informar que el rider con ID proveída se encargará del envío                                                        |
 | Ping Request              | PedidosRust🦀          | Restaurant🍴 ó Rider🛵 |                                                                      | Consultar si el servicio está on-line mediante UDP                                                                  |
-| Ping Response             | Restaurant🍴 ó Rider🛵 | PedidosRust🦀          |                                                                      | Informar mediante UDP que el servicio sí está on-line                                                               |
-| Register Payment System   | PaymentSystem 💲 | PedidosRust🦀          |                                                                      | Para que PedidosRust registre al payment system                                                                     |
-
+| Ping Response             | Restaurant🍴 ó Rider🛵 | PedidosRust🦀          |                                                                      | Informar mediante UDP que el servicio sí está on-line       
 
 A nivel actores, todos poseen un automensaje `Start`, que se envía al comienzo de su ejecución, y `Stop` para marcar la finalización de su ejecución.
 
@@ -309,3 +308,94 @@ Por otro lado, con el objetivo de garantizar la integridad de datos entre las r�
 
 #### Mecanismo de pinger
 Para garantizar la detección de desconexiones de riders y restaurantes, habrá un componente “pinger” dentro del ConnectionManager. Este módulo recibe como entrada los identificadores (puertos UDP) de todos los actores que está rastreando y les envía, cada 500 ms, un paquete “ping” a través de UDP, separando así el canal de verificación de la conexión del flujo principal de mensajes TCP. Si un mismo actor deja de responder durante cinco pings consecutivos, se asume su desconexión. Una vez marcado como desconectado, el actor entra en un periodo de gracia de 40 s durante el cual puede volver a reconectarse sin pérdida de estado. Transcurrido este plazo sin respuesta, el pinger notifica al ConnectionManager que la conexión es irrecuperable y se procede a limpiar recursos asociados y a informar al resto del sistema la indisponibilidad definitiva de ese actor.
+
+
+## Cambios realizados
+
+## Uso
+
+Se deja las instrucciones para ejecutar las diversas apps:
+
+**Customer:**
+
+```bash
+cargo run -p customer <id> 
+```
+
+**Payment-System:**
+
+```bash
+cargo run -p payment-system
+```
+
+**Pedidos-rust:**
+
+```bash
+cargo run -p pedidos-rust <id>
+```
+
+**Restaurant:**
+
+```bash
+cargo run -p restaurant <id>
+```
+
+**Rider:**
+
+```bash
+cargo run -p rider <id>
+```
+
+---
+
+
+#### Mensajes
+
+| Mensaje                      | Emisor                      | Receptor                    | Payload                                                                 | Propósito                                                                                                         |
+|-----------------------------|-----------------------------|-----------------------------|-------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Get Restaurants              | Customer👨🏻‍🦱                | PedidosRust🦀               | `customer_location: Location, new_customer: bool`                       | Solicitar restaurantes para realizar un pedido                                                                  |
+| Restaurants                  | PedidosRust🦀               | Customer👨🏻‍🦱                | `data: String`                                                          | Comunicar los restaurantes disponibles                                                                          |
+| Order                        | Customer👨🏻‍🦱                | PedidosRust🦀               | `restaurant: String, amount: f64`                                       | Realizar un pedido                                                                                              |
+| Push Notification            | PedidosRust🦀               | Customer👨🏻‍🦱                | `notification_msg: String`                                              | Enviar información de seguimiento del estado del pedido                                                        |
+| Location Update              | Rider🛵                     | PedidosRust🦀               | `new_location: Location`                                                | Informar nueva ubicación                                                                                        |
+| Delivery Offer               | PedidosRust🦀               | Rider🛵                     | `customer_id: u32, customer_location: Location`                         | Ofrecer un pedido al rider                                                                                      |
+| Delivery Offer Accepted      | Rider🛵                     | PedidosRust🦀               | `customer_id: u32`                                                      | Aceptar el ofrecimiento de pedido                                                                               |
+| Delivery Offer Confirmed     | PedidosRust🦀               | Rider🛵                     | `customer_id: u32, customer_location: Location`                         | Confirmar que el rider fue asignado                                                                             |
+| Picked Up From Restaurant    | Rider🛵                     | PedidosRust🦀               | `rider_id: u32`                                                         | El rider retiró el pedido del restaurante                                                                       |
+| Delivery Done                | Rider🛵                     | PedidosRust🦀               | `customer_id: u32`                                                      | El rider llegó al destino y entregó el pedido                                                                   |
+| Finish Delivery              | PedidosRust🦀               | Customer👨🏻‍🦱                | `reason: String`                                                        | Notificar que el pedido finalizó y habilitar uno nuevo                                                         |
+| Authorize Payment            | PedidosRust🦀               | Payment 💲                  | `customer_id: u32, amount: f64, restaurant_name: String`                | Solicitar autorización del pago                                                                                 |
+| Payment Authorized           | Payment 💲                  | PedidosRust🦀               | `customer_id: u32, amount: f64, restaurant_name: String`                | Confirmar que el pago fue autorizado                                                                            |
+| Payment Denied               | Payment 💲                  | PedidosRust🦀               | `customer_id: u32, amount: f64, restaurant_name: String`                | Informar rechazo del pago                                                                                       |
+| Execute Payment              | PedidosRust🦀               | Payment 💲                  | `customer_id: u32, amount: f64`                                         | Ejecutar el débito                                                                                              |
+| Payment Executed             | Payment 💲                  | PedidosRust🦀               | `customer_id: u32, amount: f64`                                         | Confirmar que el pago fue debitado                                                                             |
+| Prepare Order                | PedidosRust🦀               | Restaurant🍴                | `customer_id: u32, price: f64`                                          | Pedir al restaurante que prepare la orden                                                                      |
+| Order In Progress            | Restaurant🍴               | PedidosRust🦀               | `customer_id: u32`                                                      | Notificar que se está preparando la orden                                                                      |
+| Order Cancelled              | Restaurant🍴               | PedidosRust🦀               | `customer_id: u32`                                                      | Informar que la orden fue cancelada                                                                            |
+| Order Ready                  | Restaurant🍴               | PedidosRust🦀               | `customer_id: u32, restaurant_location: Location`                       | Notificar que la orden está lista                                                                              |
+| Inform Location              | Restaurant🍴               | PedidosRust🦀               | `restaurant_location: Location, restaurant_name: String`               | Enviar posición del restaurante                                                                                 |
+| Rider Assigned               | PedidosRust🦀               | Restaurant🍴                | `rider_id: u32`                                                         | Informar qué rider pasará a retirar                                                                             |
+| Ping Request                 | PedidosRust🦀               | Restaurant🍴 / Rider🛵       |                                                                         | Consultar estado de conexión (UDP)                                                                             |
+| Ping Response                | Restaurant🍴 / Rider🛵      | PedidosRust🦀               |                                                                         | Confirmar que está en línea (UDP)                                                                              |
+| Register Payment System      | Payment 💲 / Admin          | PedidosRust🦀               |                                                                         | Registrar subsistema de pago                                                                                    |
+| Rider Arrived At Customer    | Rider🛵                     | PedidosRust🦀               |                                                                         | Confirmar llegada a destino                                                                                     |
+| Is Connection Ready          | Cliente/Rider/Restaurante  | PedidosRust🦀               |                                                                         | Consultar si hay conexión con CM                                                                                |
+| Connection Available         | PedidosRust🦀               | Cliente/Rider/Restaurante  |                                                                         | Confirmar conexión activa                                                                                       |
+| Connection Not Available     | PedidosRust🦀               | Cliente/Rider/Restaurante  | `port: u32`                                                             | Indicar que no hay líder; opcionalmente el puerto conocido                                                     |
+| Connection Available For Peer| PedidosRust🦀               | Cliente/Rider/Restaurante  |                                                                         | Indicar que hay un peer disponible para conexión                                                               |
+| Election Call                | Nodo                        | Nodo                        |                                                                         | Mensaje de inicio de elección de líder                                                                         |
+| Election Ok                  | Nodo                        | Nodo                        |                                                                         | Confirmación de participación en la elección                                                                   |
+| Election Coordinator         | Nodo                        | Nodo                        |                                                                         | Notificar nuevo coordinador                                                                                    |
+| Leader Query                 | Nodo                        | Nodo                        |                                                                         | Consulta por el líder actual                                                                                   |
+| Leader Data                  | Nodo                        | Nodo                        | `port: u32`                                                             | Informar quién es el líder                                                                                      |
+| Update Customer Data         | Cliente                     | PedidosRust🦀               | `customer_id: u32, location: Location, maybe_amount: Option<f64>`       | Actualizar datos del cliente                                                                                    |
+| Update Restaurant Data       | Restaurante                 | PedidosRust🦀               | `restaurant_name: String, location: Location`                          | Actualizar datos del restaurante                                                                                |
+| Update Rider Data            | Rider                       | PedidosRust🦀               | `rider_id: u32, maybe_location: Option<Location>`                      | Actualizar datos del rider                                                                                      |
+| Update OrderInProgress Data | PedidosRust🦀               | Interno                     | `customer_id: u32, location: Location, maybe_amount: Option<f64>, maybe_rider: Option<u32>` | Actualizar estado de orden en curso                                                                |
+| Remove OrderInProgress Data | PedidosRust🦀               | Interno                     | `customer_id: u32`                                                      | Eliminar seguimiento de orden                                                                                   |
+| Push Pending Delivery Request | PedidosRust🦀             | Interno                     | `customer_id: u32, location: Location, from_new_customer: bool`         | Agregar orden pendiente                                                                                         |
+| Pop Pending Delivery Request | PedidosRust🦀              | Interno                     |                                                                         | Extraer orden pendiente                                                                                         |
+
+
+
+
