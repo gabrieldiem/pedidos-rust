@@ -40,6 +40,7 @@ pub struct RegisterRestaurant {
 #[rtype(result = "()")]
 pub struct RegisterPaymentSystem {
     pub address: Addr<ClientConnection>,
+    pub port: u32,
 }
 
 #[derive(Message, Debug)]

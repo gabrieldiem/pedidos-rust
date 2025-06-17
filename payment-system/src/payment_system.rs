@@ -1,16 +1,22 @@
-use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
+use actix::{Actor, ActorContext, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
-use common::constants::{DEFAULT_PAYMENT_PORT, PAYMENT_DURATION, PAYMENT_REJECTED_PROBABILITY};
-use common::protocol::{SocketMessage, Stop};
+use common::constants::{
+    DEFAULT_PAYMENT_PORT, DEFAULT_PR_HOST, PAYMENT_DURATION, PAYMENT_REJECTED_PROBABILITY,
+};
+use common::protocol::{ReconnectToNewPedidosRust, SetupReconnection, SocketMessage, Stop};
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
+use common::udp_gateway::{InfoForUdpGatewayData, InfoForUdpGatewayRequest};
 use common::utils::logger::Logger;
 use rand::random;
 use std::io;
+use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
+use tokio::net::UdpSocket;
 use tokio::time::sleep;
 use tokio_stream::wrappers::LinesStream;
 
@@ -22,6 +28,7 @@ pub struct PaymentSystem {
     my_port: u32,
     peer_port: u32,
     tcp_connector: Addr<TcpConnector>,
+    udp_socket: Arc<UdpSocket>,
 }
 
 impl Actor for PaymentSystem {
@@ -76,7 +83,7 @@ impl Handler<RegisterPaymentSystem> for PaymentSystem {
         self.logger
             .debug("Registering Payment System to PedidosRust...");
 
-        let msg = SocketMessage::RegisterPaymentSystem;
+        let msg = SocketMessage::RegisterPaymentSystem(self.my_port);
         if let Err(e) = self.send_message(&msg) {
             self.logger.error(&e.to_string());
             return;
@@ -133,6 +140,87 @@ impl Handler<ExecutePayment> for PaymentSystem {
     }
 }
 
+#[async_handler]
+impl Handler<InfoForUdpGatewayRequest> for PaymentSystem {
+    type Result = InfoForUdpGatewayData;
+
+    async fn handle(
+        &mut self,
+        _msg: InfoForUdpGatewayRequest,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        return InfoForUdpGatewayData {
+            port: self.my_port,
+            configuration: self.config.clone(),
+            udp_socket: self.udp_socket.clone(),
+        };
+    }
+}
+
+#[async_handler]
+impl Handler<SetupReconnection> for PaymentSystem {
+    type Result = ();
+
+    async fn handle(&mut self, msg: SetupReconnection, _ctx: &mut Self::Context) -> Self::Result {
+        let read_half = msg.read_half;
+        let tcp_sender = msg.tcp_sender;
+
+        PaymentSystem::add_stream(LinesStream::new(BufReader::new(read_half).lines()), _ctx);
+        self.tcp_sender = tcp_sender;
+
+        self.logger.info("Reconnection established")
+    }
+}
+
+impl Handler<ReconnectToNewPedidosRust> for PaymentSystem {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(&mut self, msg: ReconnectToNewPedidosRust, _ctx: &mut Self::Context) -> Self::Result {
+        let new_id = msg.new_id;
+        let new_port = msg.new_port;
+        self.logger.info(&format!(
+            "Reconnecting to new PedidosRust with ID {} and port {}",
+            new_id, new_port
+        ));
+
+        let port = self.my_port;
+        let logger = self.logger.clone();
+        let my_address = _ctx.address();
+        let udp_socket = self.udp_socket.clone();
+        let old_tcp_sender = self.tcp_sender.clone();
+
+        Box::pin(
+            async move {
+                let _ = old_tcp_sender.send(Stop {}).await;
+
+                let tcp_connector = TcpConnector::new(port, vec![new_port]);
+                let stream_res = tcp_connector.connect_with_socket(udp_socket).await;
+                match stream_res {
+                    Ok(stream) => {
+                        let (read_half, write_half) = split(stream);
+
+                        let tcp_sender = TcpSender {
+                            write_stream: Some(write_half),
+                        }
+                        .start();
+
+                        let _ = my_address
+                            .send(SetupReconnection {
+                                tcp_sender,
+                                read_half,
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        logger.error(&format!("Could not connect to stream: {}", e));
+                    }
+                }
+            }
+            .into_actor(self),
+        )
+    }
+}
+
 impl PaymentSystem {
     pub async fn new(logger: Logger) -> Result<Addr<PaymentSystem>, Box<dyn std::error::Error>> {
         logger.info("Starting...");
@@ -153,6 +241,19 @@ impl PaymentSystem {
         let stream = tcp_connector.connect().await?;
         let peer_address = stream.peer_addr()?;
         let peer_port = peer_address.port();
+
+        let local_addr: SocketAddr = match format!("{}:{}", DEFAULT_PR_HOST, my_port).parse() {
+            Ok(addr) => addr,
+            Err(e) => return Err(e.into()),
+        };
+
+        let udp_socket = match UdpSocket::bind(local_addr).await {
+            Ok(socket) => Arc::new(socket),
+            Err(e) => {
+                logger.error(&format!("Could not get UDP socket: {e}"));
+                return Err(e.into());
+            }
+        };
 
         // Creating actor
         let payment_system = PaymentSystem::create(|ctx| {
@@ -181,6 +282,7 @@ impl PaymentSystem {
                 my_port,
                 peer_port: peer_port as u32,
                 tcp_connector: tcp_connector_actor,
+                udp_socket,
             }
         });
         Ok(payment_system)
@@ -256,5 +358,9 @@ impl StreamHandler<Result<String, io::Error>> for PaymentSystem {
                     .error(&format!("Failed to read from stream: {}", e));
             }
         }
+    }
+
+    fn finished(&mut self, _ctx: &mut Self::Context) {
+        self.logger.warn("Detected PedidosRust connection down");
     }
 }

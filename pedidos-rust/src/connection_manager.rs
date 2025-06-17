@@ -20,8 +20,8 @@ use common::protocol::{
     LeaderQuery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification,
     Restaurants, RiderArrivedAtCustomer, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
-    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
-    Stop,
+    SendUpdateOrderInProgressData, SendUpdatePaymentSystemData, SendUpdateRestaurantData,
+    SendUpdateRiderData, SocketMessage, Stop, UpdatePaymentSystemData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -123,6 +123,7 @@ pub enum HistoricalMessage {
     SendPushPendingDeliveryRequest(SendPushPendingDeliveryRequest),
     SendPopPendingDeliveryRequest(SendPopPendingDeliveryRequest),
     SendRemoveOrderInProgressData(SendRemoveOrderInProgressData),
+    SendUpdatePaymentSystemData(SendUpdatePaymentSystemData),
 }
 
 impl From<SendUpdateCustomerData> for HistoricalMessage {
@@ -164,6 +165,12 @@ impl From<SendPopPendingDeliveryRequest> for HistoricalMessage {
 impl From<SendRemoveOrderInProgressData> for HistoricalMessage {
     fn from(msg: SendRemoveOrderInProgressData) -> Self {
         HistoricalMessage::SendRemoveOrderInProgressData(msg)
+    }
+}
+
+impl From<SendUpdatePaymentSystemData> for HistoricalMessage {
+    fn from(msg: SendUpdatePaymentSystemData) -> Self {
+        HistoricalMessage::SendUpdatePaymentSystemData(msg)
     }
 }
 
@@ -219,6 +226,7 @@ pub struct ConnectionManager {
     pub restaurant_connections: HashMap<RestaurantName, Addr<ClientConnection>>,
     pub restaurants: HashMap<RestaurantName, RestaurantData>,
     pub payment_system: Option<Addr<ClientConnection>>,
+    pub payment_system_port: u32,
 
     pub orders_in_process: HashMap<CustomerId, OrderData>,
     pub pending_delivery_requests: VecDeque<FindRider>,
@@ -232,6 +240,8 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
+    const UNKNOWN_PAYMENT_SYSTEM_PORT: u32 = 0;
+
     pub fn new(
         id: u32,
         port: u32,
@@ -252,6 +262,7 @@ impl ConnectionManager {
             restaurant_connections: HashMap::new(),
             restaurants: HashMap::new(),
             payment_system: None,
+            payment_system_port: Self::UNKNOWN_PAYMENT_SYSTEM_PORT,
             server_peers: HashMap::new(),
             leader: None,
             next_server_peer: None,
@@ -426,6 +437,19 @@ impl ConnectionManager {
         }
 
         Ok(())
+    }
+
+    fn send_a_historical_message(&self, address: Addr<ServerPeer>, msg: HistoricalMessage) {
+        match msg {
+            HistoricalMessage::SendUpdateCustomerData(msg) => address.do_send(msg),
+            HistoricalMessage::SendUpdateRestaurantData(msg) => address.do_send(msg),
+            HistoricalMessage::SendUpdateRiderData(msg) => address.do_send(msg),
+            HistoricalMessage::SendUpdateOrderInProgressData(msg) => address.do_send(msg),
+            HistoricalMessage::SendPushPendingDeliveryRequest(msg) => address.do_send(msg),
+            HistoricalMessage::SendPopPendingDeliveryRequest(msg) => address.do_send(msg),
+            HistoricalMessage::SendRemoveOrderInProgressData(msg) => address.do_send(msg),
+            HistoricalMessage::SendUpdatePaymentSystemData(msg) => address.do_send(msg),
+        };
     }
 }
 
@@ -692,6 +716,11 @@ impl Handler<NotifyAllClientsIAmLeader> for ConnectionManager {
             self.logger.debug("No Riders to notify");
         }
 
+        let payment_system_port = self.payment_system_port;
+        if payment_system_port == Self::UNKNOWN_PAYMENT_SYSTEM_PORT {
+            self.logger.debug("No Payment system to notify");
+        }
+
         let mut restaurant_ports: Vec<u32> = Vec::new();
         for restuarant_name in self.restaurants.keys() {
             for restaurant_info in self.configuration.restaurant.infos.clone() {
@@ -736,6 +765,17 @@ impl Handler<NotifyAllClientsIAmLeader> for ConnectionManager {
                     my_id,
                 )
                 .await;
+
+                if payment_system_port != Self::UNKNOWN_PAYMENT_SYSTEM_PORT {
+                    let _ = Self::notify_every_client_i_am_new_leader(
+                        vec![payment_system_port],
+                        udp_socket.clone(),
+                        logger.clone(),
+                        my_port,
+                        my_id,
+                    )
+                    .await;
+                }
             }
             .into_actor(self),
         )
@@ -779,15 +819,7 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
         ));
 
         for message in self.historical_state.clone() {
-            match message {
-                HistoricalMessage::SendUpdateCustomerData(msg) => peer_address.do_send(msg),
-                HistoricalMessage::SendUpdateRestaurantData(msg) => peer_address.do_send(msg),
-                HistoricalMessage::SendUpdateRiderData(msg) => peer_address.do_send(msg),
-                HistoricalMessage::SendUpdateOrderInProgressData(msg) => peer_address.do_send(msg),
-                HistoricalMessage::SendPushPendingDeliveryRequest(msg) => peer_address.do_send(msg),
-                HistoricalMessage::SendPopPendingDeliveryRequest(msg) => peer_address.do_send(msg),
-                HistoricalMessage::SendRemoveOrderInProgressData(msg) => peer_address.do_send(msg),
-            }
+            self.send_a_historical_message(peer_address.clone(), message);
         }
 
         self.update_next_peer();
@@ -931,7 +963,14 @@ impl Handler<RegisterPaymentSystem> for ConnectionManager {
         _ctx: &mut Self::Context,
     ) -> Self::Result {
         self.logger.debug("Registering Payment System");
+
         self.payment_system = Some(msg.address);
+        self.payment_system_port = msg.port;
+
+        self.send_message_to_next_peer(SendUpdatePaymentSystemData {
+            port: self.payment_system_port,
+        });
+
         self.process_pending_requests();
     }
 }
@@ -1683,6 +1722,21 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
             "Updated restaurant {} with {:?} location",
             msg.restaurant_name, msg.location
         ));
+
+        self.process_pending_requests();
+    }
+}
+
+impl Handler<UpdatePaymentSystemData> for ConnectionManager {
+    type Result = ();
+    fn handle(&mut self, msg: UpdatePaymentSystemData, _ctx: &mut Self::Context) -> Self::Result {
+        self.payment_system_port = msg.port;
+        self.logger.info(&format!(
+            "Updated payment system data with port {} ",
+            msg.port
+        ));
+
+        self.send_message_to_next_peer(SendUpdatePaymentSystemData { port: msg.port });
 
         self.process_pending_requests();
     }
