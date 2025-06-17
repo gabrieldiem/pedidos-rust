@@ -10,24 +10,32 @@ use crate::messages::{
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
-use actix::{Actor, Addr, AsyncContext, Context, Handler, ResponseActFuture, WrapFuture};
+use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture, WrapFuture};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
-use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
+use common::constants::{DEFAULT_PR_HOST, N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
     LeaderQuery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification,
     Restaurants, RiderArrivedAtCustomer, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
-    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, Stop,
+    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
+    Stop,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::net::UdpSocket;
 
 type CustomerId = u32;
 type RiderId = u32;
 type RestaurantName = String;
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct NotifyAllClientsIAmLeader {}
 
 /// `LeaderData` holds the information about the Leader of the PedidosRust instances.
 ///
@@ -147,6 +155,7 @@ pub struct ConnectionManager {
     pub id: u32,
     pub port: u32,
     pub configuration: Configuration,
+    pub udp_socket: Arc<UdpSocket>,
 
     // Entities
     pub customer_connections: HashMap<CustomerId, Addr<ClientConnection>>,
@@ -168,7 +177,12 @@ pub struct ConnectionManager {
 }
 
 impl ConnectionManager {
-    pub fn new(id: u32, port: u32, configuration: Configuration) -> ConnectionManager {
+    pub fn new(
+        id: u32,
+        port: u32,
+        configuration: Configuration,
+        udp_socket: Arc<UdpSocket>,
+    ) -> ConnectionManager {
         ConnectionManager {
             id,
             port,
@@ -187,6 +201,7 @@ impl ConnectionManager {
             leader: None,
             next_server_peer: None,
             election_in_progress: false,
+            udp_socket,
         }
     }
 
@@ -303,6 +318,57 @@ impl ConnectionManager {
             ));
         }
     }
+
+    fn serialize_message(message: SocketMessage) -> Result<String, Box<dyn std::error::Error>> {
+        let msg_to_send = serde_json::to_string(&message)?;
+        Ok(msg_to_send)
+    }
+
+    async fn notify_every_client_i_am_new_leader(
+        client_ports: Vec<u32>,
+        udp_socket: Arc<UdpSocket>,
+        logger: Logger,
+        leader_port: u32,
+        leader_id: u32,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        for client_port in client_ports {
+            logger.debug(&format!(
+                "Informing client with port {client_port} that I am new leader with ID {leader_id}"
+            ));
+
+            let client_addr: SocketAddr =
+                match format!("{}:{}", DEFAULT_PR_HOST, client_port).parse() {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        logger.error(&format!(
+                            "Failed to parse client address for port: {client_port}. {e}"
+                        ));
+                        continue;
+                    }
+                };
+
+            let msg: String = match Self::serialize_message(SocketMessage::ReconnectionMandate(
+                leader_id,
+                leader_port,
+            )) {
+                Ok(msg) => msg,
+                Err(e) => {
+                    logger.error(&format!("Failed to serialize message: {e}"));
+                    continue;
+                }
+            };
+
+            match udp_socket.send_to(msg.as_bytes(), client_addr).await {
+                Ok(_) => {}
+                Err(e) => {
+                    logger.error(&format!("Failed to send UDP message: {e}"));
+                    continue;
+                }
+            };
+        }
+
+        Ok(())
+    }
 }
 
 impl Actor for ConnectionManager {
@@ -360,11 +426,11 @@ impl Handler<PeerDisconnected> for ConnectionManager {
         let peer_id = msg.peer_id;
         self.logger
             .warn(&format!("Peer with id {peer_id} disconnected"));
-        let mut was_disconnected_peer_the_leader = false;
+        let mut was_the_disconnected_peer_the_leader = false;
 
         if let Some(leader_data) = self.leader.clone() {
             if leader_data.id == peer_id {
-                was_disconnected_peer_the_leader = true;
+                was_the_disconnected_peer_the_leader = true;
             }
         }
 
@@ -380,10 +446,11 @@ impl Handler<PeerDisconnected> for ConnectionManager {
             }
         }
 
-        if was_disconnected_peer_the_leader && self.server_peers.is_empty() {
+        if was_the_disconnected_peer_the_leader && self.server_peers.is_empty() {
             // There is no one so I will be the leader
             _ctx.address().do_send(InitLeader {});
-        } else if was_disconnected_peer_the_leader {
+            _ctx.address().do_send(NotifyAllClientsIAmLeader {});
+        } else if was_the_disconnected_peer_the_leader {
             // There is at least one peer still so I call elections
             _ctx.address().do_send(ElectionCall {});
         }
@@ -533,7 +600,87 @@ impl Handler<ElectionCall> for ConnectionManager {
                     }
                 };
             }
+            _ctx.address().do_send(NotifyAllClientsIAmLeader {});
         }
+    }
+}
+
+impl Handler<NotifyAllClientsIAmLeader> for ConnectionManager {
+    type Result = ResponseActFuture<Self, ()>;
+
+    fn handle(
+        &mut self,
+        _msg: NotifyAllClientsIAmLeader,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        self.logger
+            .info("Notifying all clients I am the new leader");
+
+        let mut customer_ports: Vec<u32> = Vec::new();
+        for customer_id in self.customers.keys() {
+            customer_ports.push(*customer_id);
+        }
+
+        if customer_ports.is_empty() {
+            self.logger.debug("No Customers to notify");
+        }
+
+        let mut rider_ports: Vec<u32> = Vec::new();
+        for rider_id in self.riders.keys() {
+            rider_ports.push(*rider_id);
+        }
+
+        if rider_ports.is_empty() {
+            self.logger.debug("No Riders to notify");
+        }
+
+        let mut restaurant_ports: Vec<u32> = Vec::new();
+        for restuarant_name in self.restaurants.keys() {
+            for restaurant_info in self.configuration.restaurant.infos.clone() {
+                if *restuarant_name == restaurant_info.name {
+                    restaurant_ports.push(restaurant_info.port);
+                }
+            }
+        }
+
+        if restaurant_ports.is_empty() {
+            self.logger.debug("No Restaurants to notify");
+        }
+
+        let udp_socket = self.udp_socket.clone();
+        let logger = self.logger.clone();
+        let my_port = self.port;
+        let my_id = self.id;
+
+        Box::pin(
+            async move {
+                let _ = Self::notify_every_client_i_am_new_leader(
+                    customer_ports,
+                    udp_socket.clone(),
+                    logger.clone(),
+                    my_port,
+                    my_id,
+                )
+                .await;
+                let _ = Self::notify_every_client_i_am_new_leader(
+                    rider_ports,
+                    udp_socket.clone(),
+                    logger.clone(),
+                    my_port,
+                    my_id,
+                )
+                .await;
+                let _ = Self::notify_every_client_i_am_new_leader(
+                    restaurant_ports,
+                    udp_socket.clone(),
+                    logger.clone(),
+                    my_port,
+                    my_id,
+                )
+                .await;
+            }
+            .into_actor(self),
+        )
     }
 }
 

@@ -23,6 +23,7 @@ pub struct Server {
     logger: Logger,
     configuration: Configuration,
     connection_manager: Addr<ConnectionManager>,
+    udp_socket: Arc<UdpSocket>,
     port: u32,
     ports_for_peers: Vec<u32>,
     ports_for_peers_in_use: HashMap<u32, bool>,
@@ -47,8 +48,21 @@ impl Server {
             }
         };
 
+        let local_addr: SocketAddr = match format!("{}:{}", DEFAULT_PR_HOST, my_port).parse() {
+            Ok(addr) => addr,
+            Err(e) => return Err(e.into()),
+        };
+
+        let udp_socket = match UdpSocket::bind(local_addr).await {
+            Ok(socket) => Arc::new(socket),
+            Err(e) => {
+                logger.error(&format!("Could not get UDP socket: {e}"));
+                return Err(e.into());
+            }
+        };
+
         let connection_manager = ConnectionManager::create(|_ctx| {
-            ConnectionManager::new(id, my_port, configuration.clone())
+            ConnectionManager::new(id, my_port, configuration.clone(), udp_socket.clone())
         });
 
         let mut ports_for_peers_in_use: HashMap<u32, bool> = HashMap::new();
@@ -64,6 +78,7 @@ impl Server {
             port: my_port,
             ports_for_peers,
             ports_for_peers_in_use,
+            udp_socket,
         })
     }
 
@@ -145,20 +160,13 @@ impl Server {
         id: u32,
         connection_manager: Addr<ConnectionManager>,
         configuration: Configuration,
-    ) -> Result<Arc<UdpSocket>, Box<dyn std::error::Error>> {
+        socket: Arc<UdpSocket>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let logger = Logger::new(Some("[CONN-GATEWAY]"));
 
         let local_addr: SocketAddr = match format!("{}:{}", DEFAULT_PR_HOST, port).parse() {
             Ok(addr) => addr,
             Err(e) => return Err(e.into()),
-        };
-
-        let socket = match UdpSocket::bind(local_addr).await {
-            Ok(socket) => Arc::new(socket),
-            Err(e) => {
-                logger.error(&format!("Could not get UDP socket: {e}"));
-                return Err(e.into());
-            }
         };
 
         logger.info(&format!(
@@ -183,7 +191,7 @@ impl Server {
             }
         });
 
-        Ok(socket)
+        Ok(())
     }
 
     fn get_cannonical_peer_port(&self, peer_port_from_connection: u32) -> Option<u32> {
@@ -200,13 +208,7 @@ impl Server {
         canonical_peer_port
     }
 
-    fn create_server_peer(
-        &self,
-        peer_sockaddr: SocketAddr,
-        stream: TcpStream,
-        peer_id: u32,
-        _udp_socket: Arc<UdpSocket>,
-    ) {
+    fn create_server_peer(&self, peer_sockaddr: SocketAddr, stream: TcpStream, peer_id: u32) {
         self.logger
             .info(&format!("Peer connected: {peer_sockaddr}"));
 
@@ -279,18 +281,19 @@ impl Server {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
 
-        let (udp_socket_res, connect_server_peers_res) = tokio::join!(
+        let (run_connection_gateway_res, connect_server_peers_res) = tokio::join!(
             Self::run_connection_gateway(
                 self.port,
                 self.id,
                 self.connection_manager.clone(),
-                self.configuration.clone()
+                self.configuration.clone(),
+                self.udp_socket.clone()
             ),
             self.connect_server_peers(),
         );
 
         connect_server_peers_res?;
-        let udp_socket = udp_socket_res?;
+        run_connection_gateway_res?;
 
         self.logger.info(&format!(
             "Listening for connections on {}",
@@ -304,7 +307,7 @@ impl Server {
                 ConnectionGateway::is_connection_a_peer(&connected_sockaddr, &self.configuration);
 
             if is_peer {
-                self.create_server_peer(connected_sockaddr, stream, peer_id, udp_socket.clone());
+                self.create_server_peer(connected_sockaddr, stream, peer_id);
             } else {
                 self.create_client_connection(connected_sockaddr, stream);
             }
