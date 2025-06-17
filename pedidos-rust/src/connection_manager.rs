@@ -237,6 +237,21 @@ impl ConnectionManager {
         }
     }
 
+    /// Sends a message to the next server peer, if one is available.
+    ///
+    /// This method logs the action and forwards the provided message to the next peer.
+    ///
+    /// # Type Parameters
+    ///
+    /// * `M` - The type of the message to send. This must be:
+    ///   - `'static` so that it lives long enough for the actor system.
+    ///   - `Send` since it may be sent between threads.
+    ///   - Have a result that is also `Send`.
+    ///   - Handled by the `ServerPeer` actor.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The message to send to the next server peer.
     fn send_message_to_next_peer<M>(&self, msg: M)
     where
         M: actix::Message + Send + 'static,
@@ -265,6 +280,12 @@ impl Actor for ConnectionManager {
 impl Handler<LivenessEcho> for ConnectionManager {
     type Result = ();
 
+    /// Handles a `LivenessEcho` message by verifying its origin.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The incoming `LivenessEcho` message.
+    /// * `_ctx` - The actor context (unused).
     fn handle(&mut self, msg: LivenessEcho, _ctx: &mut Self::Context) -> Self::Result {
         let origin_port = msg.origin_port;
         let origin = self
@@ -307,6 +328,17 @@ impl Handler<PeerDisconnected> for ConnectionManager {
 impl Handler<StartHeartbeat> for ConnectionManager {
     type Result = ();
 
+    /// Processes a `StartHeartbeat` message.
+    ///
+    /// If there are no peer connections, this method logs the absence and
+    /// takes on the leader role by sending an `ElectionCoordinatorReceived`
+    /// message to itself. Otherwise, it forwards the heartbeat message—cloning
+    /// the provided UDP socket—to each peer.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The heartbeat message containing the UDP socket.
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
         if self.server_peers.is_empty() {
             self.logger.info("No peer connection. Taking leader role");
@@ -344,6 +376,15 @@ impl Handler<GetPeers> for ConnectionManager {
 impl Handler<ElectionCoordinatorReceived> for ConnectionManager {
     type Result = ();
 
+    /// Handles an `ElectionCoordinatorReceived` message.
+    ///
+    /// This async handler resets the election flag, looks up the leader by port in the
+    /// configuration and updates the leader information if found
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The message carrying the leader's port.
+    /// * `_ctx` - The actor context (unused in this handler).
     async fn handle(
         &mut self,
         msg: ElectionCoordinatorReceived,
@@ -381,6 +422,17 @@ impl Handler<ElectionCoordinatorReceived> for ConnectionManager {
 impl Handler<ElectionCall> for ConnectionManager {
     type Result = ();
 
+    /// Initiates a leader election by handling an `ElectionCall` message.
+    ///
+    /// If no election is in progress, this handler sends an `ElectionCall` to all peers
+    /// with an ID greater than the current node's. If at least one such peer exists,
+    /// it flags that an election is underway. If no higher-ID peer exists, the current
+    /// node assumes leadership and sends an `ElectionCoordinator` message to all peers.
+    ///
+    /// # Arguments
+    ///
+    /// * `_msg` - The incoming `ElectionCall` message (content unused).
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, _msg: ElectionCall, _ctx: &mut Self::Context) -> Self::Result {
         if self.election_in_progress {
             return;
@@ -436,6 +488,16 @@ impl Handler<GetLeaderInfo> for ConnectionManager {
 impl Handler<RegisterPeerServer> for ConnectionManager {
     type Result = ();
 
+    /// Registers a new peer server and updates the next server peer.
+    ///
+    /// This handler:
+    /// - Inserts the provided peer address into `server_peers` if it is not already present.
+    /// - Updates `next_server_peer` and logs the updated peer.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `RegisterPeerServer` message containing the peer's ID and address.
+    /// * `_ctx` - The actor context (unused in this handler).
     async fn handle(&mut self, msg: RegisterPeerServer, _ctx: &mut Self::Context) -> Self::Result {
         let peer_address = msg.address;
         self.logger
@@ -447,18 +509,24 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
         let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) =
             self.server_peers.keys().partition(|&n| *n <= self.id);
 
-        let updated_next_peer_id: &u32 = if greater_peers.is_empty() {
-            lesser_peers.iter().min().unwrap_or(&&0)
-        } else {
-            greater_peers.iter().min().unwrap_or(&&0)
-        };
+        let next_peer_id = self
+            .server_peers
+            .keys()
+            .filter(|&&id| id > self.id)
+            .min()
+            .copied()
+            .or_else(|| self.server_peers.keys().min().copied());
 
-        self.next_server_peer = Some((
-            *updated_next_peer_id,
-            self.server_peers.get(updated_next_peer_id).unwrap().clone(),
-        ));
+        // Update the next server peer if found.
+        self.next_server_peer = next_peer_id.and_then(|peer_id| {
+            self.server_peers
+                .get(&peer_id)
+                .cloned()
+                .map(|addr| (peer_id, addr))
+        });
         self.logger.info(&format!(
-            "Updated next peer server to peer no {updated_next_peer_id}"
+            "Updated next peer server to peer no {:?}",
+            next_peer_id
         ));
         self.process_pending_requests();
     }
@@ -468,6 +536,20 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
 impl Handler<IsPeerConnected> for ConnectionManager {
     type Result = Result<bool, ()>;
 
+    /// Checks whether a peer is connected.
+    ///
+    /// This handler inspects the server peers to determine if the peer with the given ID
+    /// is connected.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The `IsPeerConnected` message containing the peer ID to check.
+    /// * `_ctx` - The actor context (unused).
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(true)` if the peer is connected.
+    /// * `Ok(false)` if the peer is not connected.
     async fn handle(&mut self, msg: IsPeerConnected, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Checking if peer with ID {} is connected", msg.id));
@@ -492,6 +574,12 @@ impl Handler<IsPeerConnected> for ConnectionManager {
 impl Handler<RegisterRider> for ConnectionManager {
     type Result = ();
 
+    /// Registers a new rider.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `RegisterRider` message containing the rider's ID, address, and location.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: RegisterRider, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Rider with ID {}", msg.id));
@@ -511,6 +599,12 @@ impl Handler<RegisterRider> for ConnectionManager {
 impl Handler<RegisterCustomer> for ConnectionManager {
     type Result = ();
 
+    /// Registers a new customer.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `RegisterCustomer` message carrying the customer's ID, address, and location.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: RegisterCustomer, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Customer with ID {}", msg.id));
@@ -533,6 +627,12 @@ impl Handler<RegisterCustomer> for ConnectionManager {
 impl Handler<RegisterRestaurant> for ConnectionManager {
     type Result = ();
 
+    /// Registers a new restaurant.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `RegisterRestaurant` message containing the restaurant's ID, name, address, and location.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: RegisterRestaurant, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Registering Restaurant with ID {} and name {}",
@@ -558,6 +658,12 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
 impl Handler<RegisterPaymentSystem> for ConnectionManager {
     type Result = ();
 
+    /// Registers the payment system.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `RegisterPaymentSystem` message containing the payment system's address.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(
         &mut self,
         msg: RegisterPaymentSystem,
@@ -573,6 +679,12 @@ impl Handler<RegisterPaymentSystem> for ConnectionManager {
 impl Handler<SendRestaurantList> for ConnectionManager {
     type Result = ();
 
+    /// Sends nearby restaurants to a customer.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `SendRestaurantList` message with the customer's ID.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: SendRestaurantList, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Sending available restaurants to client {}",
@@ -616,6 +728,16 @@ impl Handler<SendRestaurantList> for ConnectionManager {
 impl Handler<AuthorizePayment> for ConnectionManager {
     type Result = ();
 
+    /// Authorizes a payment for a customer.
+    ///
+    /// This handler constructs an `AuthorizePaymentRequest` from the incoming message and,
+    /// if a payment system is available, forwards the request to it. Otherwise, it notifies the
+    /// customer by sending a `FinishDelivery` message with a failure reason.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The `AuthorizePayment` message containing customer ID, price, and restaurant name.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: AuthorizePayment, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Authorizing payment for customer {} with price {}",
@@ -650,6 +772,16 @@ impl Handler<AuthorizePayment> for ConnectionManager {
 impl Handler<PaymentAuthorized> for ConnectionManager {
     type Result = ();
 
+    /// Authorizes a payment for a customer.
+    ///
+    /// This handler constructs an `AuthorizePaymentRequest` from the incoming message and,
+    /// if a payment system is available, forwards the request to it. Otherwise, it  notifies
+    /// the customer by sending a `FinishDelivery` message with a failure reason.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - The `AuthorizePayment` message containing customer ID, price, and restaurant name.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: PaymentAuthorized, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Payment authorized for customer {} with amount {}",
@@ -682,6 +814,15 @@ impl Handler<PaymentAuthorized> for ConnectionManager {
 impl Handler<PaymentDenied> for ConnectionManager {
     type Result = ();
 
+    /// Handles a denied payment.
+    ///
+    /// This handler notifies the customer by sending a
+    /// `FinishDelivery` message with the denial reason.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `PaymentDenied` message containing the customer's ID, amount, and restaurant name.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: PaymentDenied, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Payment denied for customer {} with amount {}",
@@ -708,6 +849,18 @@ impl Handler<PaymentDenied> for ConnectionManager {
 impl Handler<OrderRequest> for ConnectionManager {
     type Result = ();
 
+    /// Prepares and processes a customer's order request.
+    ///
+    /// This handler performs multiple steps:
+    ///
+    /// 1. Updates the customer's order price in `customers` and notifies the next peer with updated data.
+    /// 2. Inserts the order into `orders_in_process` with the customer's location. Broadcasts the update
+    /// 3. Forwards the order to the corresponding restaurant.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `OrderRequest` message containing the customer ID, restaurant name, and order price.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: OrderRequest, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Preparing order for customer {} at restaurant {} with price {}",
@@ -715,13 +868,14 @@ impl Handler<OrderRequest> for ConnectionManager {
         ));
         if let Some(customer) = self.customers.get_mut(&msg.customer_id) {
             customer.order_price = Some(msg.order_price);
-            if let Some((_, peer)) = &self.next_server_peer {
-                peer.do_send(SendUpdateCustomerData {
-                    customer_id: msg.customer_id,
-                    location: customer.location,
-                    order_price: customer.order_price,
-                })
-            }
+            let location = customer.location;
+            let order_price = customer.order_price;
+            // The mutable borrow ends here.
+            self.send_message_to_next_peer(SendUpdateCustomerData {
+                customer_id: msg.customer_id,
+                location,
+                order_price,
+            });
         } else {
             self.logger
                 .warn("Failed to find customer data when preparing order");
@@ -768,6 +922,12 @@ impl Handler<OrderRequest> for ConnectionManager {
 impl Handler<SendNotification> for ConnectionManager {
     type Result = ();
 
+    /// Sends a push notification to a customer.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `SendNotification` message containing the recipient's ID and the notification message.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: SendNotification, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Sending notification to customer {}: {}",
@@ -790,6 +950,20 @@ impl Handler<SendNotification> for ConnectionManager {
 impl Handler<OrderReady> for ConnectionManager {
     type Result = ResponseActFuture<Self, ()>;
 
+    /// Notifies the customer that the order is ready and initiates a rider search.
+    ///
+    /// This handler sends a push notification to the customer informing them that their order is ready,
+    /// triggers a `FindRider` message to begin searching for a rider and using the restaurant location
+    /// from the message
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `OrderReady` message with the customer's ID and restaurant location.
+    /// * `ctx` - The actor context, used to dispatch further messages (e.g., `FindRider`).
+    ///
+    /// # Returns
+    ///
+    /// A pinned actor future.
     fn handle(&mut self, msg: OrderReady, ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
             let notification_msg =
@@ -816,6 +990,14 @@ impl Handler<OrderReady> for ConnectionManager {
 impl Handler<OrderCancelled> for ConnectionManager {
     type Result = ();
 
+    /// Processes an order cancellation.
+    ///
+    /// This handler checks if the customer is connected. If so, it removes the order from the in-progress list
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `OrderCancelled` message containing the customer's ID.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: OrderCancelled, _ctx: &mut Self::Context) -> Self::Result {
         if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
             self.orders_in_process.remove(&msg.customer_id);
@@ -836,6 +1018,17 @@ impl Handler<OrderCancelled> for ConnectionManager {
 impl Handler<FindRider> for ConnectionManager {
     type Result = ();
 
+    /// Finds the closest available riders for a customer's order.
+    ///
+    /// This handler retrieves the customer's location, determines the closest riders based
+    /// on the restaurant's location using `NearbyEntities::closest_riders`, if no suitable riders
+    /// are found adds the request to pending requests, and forwards the pending request. Otherwise,
+    /// sends a `DeliveryOffer` to each of the closest riders.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `FindRider` message containing the customer's ID and restaurant location.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: FindRider, _ctx: &mut Self::Context) -> Self::Result {
         let customer_loc = match self.customers.get(&msg.customer_id) {
             Some(customer) => &customer.location,
@@ -877,6 +1070,16 @@ impl Handler<FindRider> for ConnectionManager {
 impl Handler<DeliveryOfferAccepted> for ConnectionManager {
     type Result = ();
 
+    /// Processes a customer's acceptance of a delivery offer.
+    ///
+    /// This handler:
+    /// - Notifies the customer that the selected rider will deliver their order and updates
+    /// the rider data on the custome
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `DeliveryOfferAccepted` message containing the customer ID and rider ID.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(
         &mut self,
         msg: DeliveryOfferAccepted,
@@ -960,6 +1163,14 @@ impl Handler<DeliveryOfferAccepted> for ConnectionManager {
 impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
     type Result = ();
 
+    /// Processes a customer's acceptance of a delivery offer.
+    ///
+    /// This handler notifies the customer that the selected rider will deliver their order.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `DeliveryOfferAccepted` message containing the customer ID and rider ID.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(
         &mut self,
         msg: RiderArrivedAtCustomer,
@@ -1002,6 +1213,16 @@ impl Handler<RiderArrivedAtCustomer> for ConnectionManager {
 impl Handler<LocationUpdateForRider> for ConnectionManager {
     type Result = ();
 
+    /// Updates the location for a rider and propagates the change to the next server peer.
+    ///
+    /// This handler logs the received location update, attempts to update the rider's location
+    /// in the local `riders` state, and sends a `SendUpdateRiderData` message to the next peer
+    /// to notify of the change.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `LocationUpdateForRider` message that includes the rider's ID and new location.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(
         &mut self,
         msg: LocationUpdateForRider,
