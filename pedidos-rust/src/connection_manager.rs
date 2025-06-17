@@ -103,12 +103,7 @@ impl CustomerData {
 #[derive(Debug, Clone)]
 pub struct RestaurantData {
     pub location: Location,
-}
-
-impl RestaurantData {
-    pub fn new(location: Location) -> RestaurantData {
-        RestaurantData { location }
-    }
+    pub pending_orders: VecDeque<OrderData>,
 }
 
 pub type PeerId = u32;
@@ -932,9 +927,32 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
             "Registering Restaurant with ID {} and name {}",
             msg.id, msg.name
         ));
-        self.restaurants
+        let restaurant_name = msg.name.clone();
+        let restaurant_address = msg.address.clone();
+        let restaurant = self
+            .restaurants
             .entry(msg.name.clone())
-            .or_insert(RestaurantData::new(msg.location));
+            .or_insert(RestaurantData {
+                location: msg.location,
+                pending_orders: VecDeque::new(),
+            });
+        // Enviar un mensaje al restaurant por orden pendiente
+        for pending_order in restaurant.pending_orders.iter() {
+            match pending_order.order_price {
+                Some(price) => {
+                    restaurant_address.do_send(OrderToRestaurant {
+                        customer_id: pending_order.customer_id,
+                        price,
+                    });
+                }
+                None => {
+                    self.logger.debug(&format!(
+                        "Sending pending order to restaurant {} for customer {} without price",
+                        restaurant_name, pending_order.customer_id
+                    ));
+                }
+            }
+        }
         self.restaurant_connections
             .insert(msg.name.clone(), msg.address);
 
@@ -1199,6 +1217,19 @@ impl Handler<OrderRequest> for ConnectionManager {
             },
         );
 
+        let nuevo_pedido = OrderData {
+            rider_id: None,
+            order_price: Some(msg.order_price),
+            customer_location,
+            customer_id: msg.customer_id,
+        };
+        if let Some(resto_data) = self.restaurants.get_mut(&msg.restaurant_name) {
+            resto_data.pending_orders.push_back(nuevo_pedido);
+        } else {
+            self.logger
+                .warn("Failed to find restaurant data when preparing order");
+        }
+
         self.send_message_to_next_peer(SendUpdateOrderInProgressData {
             customer_id: msg.customer_id,
             customer_location,
@@ -1272,6 +1303,12 @@ impl Handler<OrderReady> for ConnectionManager {
             customer_adress.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });
+            // Quitar del hashmap restaurants la pending_order
+            for restaurant_data in self.restaurants.values_mut() {
+                restaurant_data
+                    .pending_orders
+                    .retain(|order| order.customer_id != msg.customer_id);
+            }
             self.logger
                 .debug(&format!("Finding a rider for customer {}", msg.customer_id));
             ctx.address().do_send(FindRider {
@@ -1712,6 +1749,7 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
             })
             .or_insert(RestaurantData {
                 location: msg.location,
+                pending_orders: VecDeque::new(), // TODO: poner las pending orders
             });
         self.send_message_to_next_peer(SendUpdateRestaurantData {
             restaurant_name: msg.restaurant_name.clone(),
