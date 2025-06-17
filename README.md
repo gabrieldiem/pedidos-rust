@@ -434,5 +434,79 @@ Esto permite que:
 
     -Se mantenga la comunicación y coherencia del sistema distribuido sin depender de un único punto central.
 
+## Restaurant
 
+El restaurante se refactorizó como actor, para facilitar la conexión como los demás actores al PedidosRust que sea líder mediante TcpConnector, y poder reconectarse.
+Ahora todas las entidades se comunican con PedidosRust de la misma manera, utilizando TcpSender, y tienen nuevos campos de estado interno para manejar la conexión con la instancia Líder de PedidosRust.
+Además, al igual que las demás entidades, se configura mediante el archivo de configuración, el cual se accede mediante Configuration.
 
+Estado interno: 
+
+```bash
+pub struct Restaurant {
+    tcp_sender: Addr<TcpSender>,
+    logger: Logger,
+    location: Location,
+    config: Configuration,
+    my_port: u32,
+    peer_port: u32,
+    tcp_connector: Addr<TcpConnector>,
+    name: String,
+}
+```
+
+## Payment System
+
+El payment system también se refactorizó como actor por el mismo motivo que el restaurante. El sistema de pagos es única por lo que no tiene entradas en el archivo de configuración, pero sí tiene un puerto para conectarse al PedidosRust que sea líder.
+
+Estado interno:
+```bash
+pub struct PaymentSystem {
+    tcp_sender: Addr<TcpSender>,
+    logger: Logger,
+    config: Configuration,
+    my_port: u32,
+    peer_port: u32,
+    tcp_connector: Addr<TcpConnector>,
+    udp_socket: Arc<UdpSocket>,
+}
+```
+
+## Rider
+
+El rider ahora posee un option de la ubicación del customer. Cuando no está realizando ninguna entrega, este campo es None.
+Además, tiene el estado interno necesario para la conexión con el PedidosRust líder, al igual que las demás entidades.
+
+Estado interno:
+```bash
+pub struct Rider {
+tcp_sender: Addr<TcpSender>,
+logger: Logger,
+location: Location,
+config: Configuration,
+my_port: u32,
+peer_port: u32,
+tcp_connector: Addr<TcpConnector>,
+customer_location: Option<Location>,
+busy: bool,
+customer_id: Option<u32>,
+udp_socket: Arc<UdpSocket>,
+}
+```
+
+## Customer
+
+El customer tiene los mismos cambios que las demás entidades, ahora se conecta al PedidosRust líder mediante TcpSender y TcpConnector, y tiene un estado interno para manejar la conexión.
+Estado interno:
+```bash
+pub struct Customer {
+    tcp_sender: Addr<TcpSender>,
+    logger: Logger,
+    location: Location,
+    config: Configuration,
+    my_port: u32,
+    peer_port: u32,
+    tcp_connector: Addr<TcpConnector>,
+    udp_socket: Arc<UdpSocket>,
+}
+```
