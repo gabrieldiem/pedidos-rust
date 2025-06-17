@@ -1,8 +1,6 @@
 use crate::connection_manager::ConnectionManager;
 use crate::messages::{
-    ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GotLeaderFromPeer,
-    PeerDisconnected, PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData,
-    UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData,
+    ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GotLeaderFromPeer, PeerDisconnected, PopPendingDeliveryRequest, PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData, UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData
 };
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
@@ -480,6 +478,9 @@ impl ServerPeer {
                     self.connection_manager
                         .do_send(GotLeaderFromPeer { leader_port });
                 }
+                SocketMessage::PopPendingDeliveryRequest => self
+                    .connection_manager
+                    .do_send(PopPendingDeliveryRequest {}),
                 _ => {
                     self.logger
                         .warn(&format!("Unrecognized message: {:?}", message));

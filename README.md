@@ -399,19 +399,40 @@ cargo run -p rider <id>
 | Connection Available         | PedidosRust🦀               | Cliente/Rider/Restaurante  |                                                                         | Confirmar conexión activa                                                                                       |
 | Connection Not Available     | PedidosRust🦀               | Cliente/Rider/Restaurante  | `port: u32`                                                             | Indicar que no hay líder; opcionalmente el puerto conocido                                                     |
 | Connection Available For Peer| PedidosRust🦀               | Cliente/Rider/Restaurante  |                                                                         | Indicar que hay un peer disponible para conexión                                                               |
-| Election Call                | Nodo                        | Nodo                        |                                                                         | Mensaje de inicio de elección de líder                                                                         |
-| Election Ok                  | Nodo                        | Nodo                        |                                                                         | Confirmación de participación en la elección                                                                   |
-| Election Coordinator         | Nodo                        | Nodo                        |                                                                         | Notificar nuevo coordinador                                                                                    |
-| Leader Query                 | Nodo                        | Nodo                        |                                                                         | Consulta por el líder actual                                                                                   |
-| Leader Data                  | Nodo                        | Nodo                        | `port: u32`                                                             | Informar quién es el líder                                                                                      |
+| Election Call                | PedidosRust🦀                        | PedidosRust🦀                        |                                                                         | Mensaje de inicio de elección de líder                                                                         |
+| Election Ok                  | PedidosRust🦀                        | PedidosRust🦀                        |                                                          | Confirmación de participación en la elección                                                                   |
+| Election Coordinator         | PedidosRust🦀                        | PedidosRust🦀                        |                                                                         | Notificar nuevo coordinador                                                                                    |
+| Leader Query                 | PedidosRust🦀                   | PedidosRust🦀                |                                                                         | Consulta por el líder actual                                                                                   |
+| Leader Data                  | PedidosRust🦀                       | PedidosRust🦀                       | `port: u32`                                                             | Informar quién es el líder                                                                                      |
 | Update Customer Data         | Cliente                     | PedidosRust🦀               | `customer_id: u32, location: Location, maybe_amount: Option<f64>`       | Actualizar datos del cliente                                                                                    |
 | Update Restaurant Data       | Restaurante                 | PedidosRust🦀               | `restaurant_name: String, location: Location`                          | Actualizar datos del restaurante                                                                                |
 | Update Rider Data            | Rider                       | PedidosRust🦀               | `rider_id: u32, maybe_location: Option<Location>`                      | Actualizar datos del rider                                                                                      |
-| Update OrderInProgress Data | PedidosRust🦀               | Interno                     | `customer_id: u32, location: Location, maybe_amount: Option<f64>, maybe_rider: Option<u32>` | Actualizar estado de orden en curso                                                                |
-| Remove OrderInProgress Data | PedidosRust🦀               | Interno                     | `customer_id: u32`                                                      | Eliminar seguimiento de orden                                                                                   |
-| Push Pending Delivery Request | PedidosRust🦀             | Interno                     | `customer_id: u32, location: Location, from_new_customer: bool`         | Agregar orden pendiente                                                                                         |
-| Pop Pending Delivery Request | PedidosRust🦀              | Interno                     |                                                                         | Extraer orden pendiente                                                                                         |
+| Update OrderInProgress Data | PedidosRust🦀               | PedidosRust🦀                     | `customer_id: u32, location: Location, maybe_amount: Option<f64>, maybe_rider: Option<u32>` | Actualizar estado de orden en curso                                                                |
+| Remove OrderInProgress Data | PedidosRust🦀               | PedidosRust🦀                     | `customer_id: u32`                                                      | Eliminar seguimiento de orden                                                                                   |
+| Push Pending Delivery Request | PedidosRust🦀             | PedidosRust🦀                     | `customer_id: u32, location: Location, from_new_customer: bool`         | Agregar orden pendiente                                                                                         |
+| Pop Pending Delivery Request | PedidosRust🦀              | PedidosRust🦀                     |                                                                         | Extraer orden pendiente                                                                                         |
 | Reconnection Mandate | PedidosRust🦀              | Customer/Rider/Restaurante/Payment 💲                |  `new_leader_id: u32, new_leader_port: u32`                        | Informa quien es el nuevo lider al que se tienen que conectar las entidades
+
+
+## Connection Getaway
+
+ConnectionGateway se encarga de recibir y reenviar mensajes que circulan entre peers a través del anillo. Su rol puede resumirse así:
+
+    - Acepta conexiones entrantes desde otros peers del ring.
+
+    - Escucha en un socket TCP para recibir mensajes serializados.
+
+    - Deserializa esos mensajes a través del tipo Message (definido en messages.rs).
+
+    - Los reenvía a través de un canal interno al ConnectionManager, que se encarga de su interpretación y posible propagación.
+
+Esto permite que:
+
+    -Los pedidos nuevos (NewPedido) puedan pasar de peer en peer hasta que uno los tome.
+
+    -Los mensajes de control (Ping, EntityDisconnected, etc.) se propaguen a lo largo del ring.
+
+    -Se mantenga la comunicación y coherencia del sistema distribuido sin depender de un único punto central.
 
 
 

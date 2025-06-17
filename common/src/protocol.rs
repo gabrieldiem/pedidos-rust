@@ -38,7 +38,6 @@ pub struct ConnectTo {
 #[rtype(result = "()")]
 pub struct GetRestaurants {
     pub customer_location: Location,
-    pub new_customer: bool,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug)]
