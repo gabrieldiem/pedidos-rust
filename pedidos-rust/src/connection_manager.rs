@@ -280,7 +280,7 @@ impl Actor for ConnectionManager {
 #[async_handler]
 impl Handler<LeaderQuery> for ConnectionManager {
     type Result = ();
-        
+
     /// Broadcasts a `LeaderQuery` message to all registered server peers.
     ///
     /// # Arguments
@@ -506,9 +506,6 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
         self.server_peers
             .entry(msg.id)
             .or_insert(peer_address.clone());
-
-        let (lesser_peers, greater_peers): (Vec<&u32>, Vec<&u32>) =
-            self.server_peers.keys().partition(|&n| *n <= self.id);
 
         let next_peer_id = self
             .server_peers
@@ -1253,6 +1250,19 @@ impl Handler<LocationUpdateForRider> for ConnectionManager {
 impl Handler<DeliveryDone> for ConnectionManager {
     type Result = ();
 
+    /// Finalizes a delivery and triggers payment execution.
+    ///
+    /// This handler performs several steps:
+    ///
+    /// 1. Attempts to retrieve the order data for the specified customer.
+    /// 2. Removes the order from the orders in process and notifies the next server peer to
+    /// remove the order.
+    /// 3. Constructs and sends `ExecutePayment` message using the customer ID and order price.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `DeliveryDone` message containing the customer ID whose delivery is completed.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: DeliveryDone, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug("Entering DeliveryDone handler");
         let Some(&order_data) = self.orders_in_process.get(&msg.customer_id) else {
@@ -1298,6 +1308,17 @@ impl Handler<DeliveryDone> for ConnectionManager {
 impl Handler<PaymentExecuted> for ConnectionManager {
     type Result = ();
 
+    /// Finalizes the order after a successful payment execution.
+    ///
+    /// This handler:
+    /// - Removes the order from orders in process and notifies the next peer to remove the order.
+    /// - Sends a finish delivery message to the customer indicating the payment was successful.
+    /// - Processes any pending requests.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `PaymentExecuted` message containing the customer ID and the executed payment amount.
+    /// * `_ctx` - The actor context (unused).
     async fn handle(&mut self, msg: PaymentExecuted, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Payment executed for customer {} with amount {}",
@@ -1324,6 +1345,19 @@ impl Handler<PaymentExecuted> for ConnectionManager {
 impl Handler<UpdateCustomerData> for ConnectionManager {
     type Result = ();
 
+    /// Updates the data for a customer and propagates the change.
+    ///
+    /// This handler performs the following actions:
+    ///
+    /// 1. Updates the customer's location and order price if the customer data already exists;
+    ///    otherwise, inserts a new entry with the provided data.
+    /// 2. Propagates the update to the next peer by sending a `SendUpdateCustomerData` message.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `UpdateCustomerData` message containing the customer's ID, the new location,
+    ///   and the order price.
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(&mut self, msg: UpdateCustomerData, _ctx: &mut Self::Context) -> Self::Result {
         self.customers
             .entry(msg.customer_id)
@@ -1353,6 +1387,18 @@ impl Handler<UpdateCustomerData> for ConnectionManager {
 impl Handler<UpdateRestaurantData> for ConnectionManager {
     type Result = ();
 
+    /// Updates the data for a restaurant and forwards the update.
+    ///
+    /// This handler performs the following actions:
+    ///
+    /// 1. Updates the restaurant’s location if the restaurant data already exists; otherwise,
+    ///    it creates a new entry with the provided location.
+    /// 2. Propagates the update to the next server peer by sending a `SendUpdateRestaurantData` message.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `UpdateRestaurantData` message containing the restaurant's name and new location.
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(&mut self, msg: UpdateRestaurantData, _ctx: &mut Self::Context) -> Self::Result {
         self.restaurants
             .entry(msg.restaurant_name.clone())
@@ -1379,6 +1425,18 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
 impl Handler<UpdateRiderData> for ConnectionManager {
     type Result = ();
 
+    /// Updates the location data for a rider and propagates the change.
+    ///
+    /// This handler performs the following actions:
+    ///
+    /// 1. Updates the rider’s location if the rider data already exists; otherwise, it creates a new
+    ///    entry with the provided location.
+    /// 2. Sends a `SendUpdateRiderData` message to the next server peer to propagate the update.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `UpdateRiderData` message containing the rider's ID and the new location.
+    /// * `_ctx` - The actor context (unused).
     fn handle(&mut self, msg: UpdateRiderData, _ctx: &mut Self::Context) -> Self::Result {
         self.riders
             .entry(msg.rider_id)
@@ -1405,6 +1463,19 @@ impl Handler<UpdateRiderData> for ConnectionManager {
 impl Handler<UpdateOrderInProgressData> for ConnectionManager {
     type Result = ();
 
+    /// Updates the details of an order in progress and propagates the update.
+    ///
+    /// This handler:
+    ///
+    /// 1. Updates the order information (customer location, order price, and assigned rider)
+    ///    in the local `orders_in_process` map. If an entry does not exist, it creates one.
+    /// 2. Propagates the update to the next server peer by sending a `SendUpdateOrderInProgressData` message.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - An `UpdateOrderInProgressData` message containing the customer's ID,
+    ///   customer location, order price, and optionally a rider ID.
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(&mut self, msg: UpdateOrderInProgressData, _ctx: &mut Self::Context) -> Self::Result {
         self.orders_in_process
             .entry(msg.customer_id)
@@ -1439,6 +1510,17 @@ impl Handler<UpdateOrderInProgressData> for ConnectionManager {
 impl Handler<RemoveOrderInProgressData> for ConnectionManager {
     type Result = ();
 
+    /// Removes an order in progress and propagates the removal.
+    ///
+    /// This handler performs the following actions:
+    ///
+    /// 1. Removes the order associated with the given customer ID from the local `orders_in_process` map.
+    /// 2. Notifies the next server peer of the removal by sending a `SendRemoveOrderInProgressData` message.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `RemoveOrderInProgressData` message containing the customer ID of the order to remove.
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(&mut self, msg: RemoveOrderInProgressData, _ctx: &mut Self::Context) -> Self::Result {
         self.orders_in_process.remove(&msg.customer_id);
         self.send_message_to_next_peer(SendRemoveOrderInProgressData {
@@ -1457,6 +1539,24 @@ impl Handler<RemoveOrderInProgressData> for ConnectionManager {
 impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
     type Result = ();
 
+    /// Adds a pending delivery request to the queue and propagates the change.
+    ///
+    /// This handler performs the following actions:
+    ///
+    /// 1. Wraps the customer ID and restaurant location from the incoming message into a `FindRider` structure.
+    /// 2. Inserts the new request into the `pending_delivery_requests` queue:
+    ///    - At the front if `msg.to_front` is true.
+    ///    - At the back otherwise.
+    /// 3. Propagates the pending delivery request to the next server peer by sending a
+    ///    `SendPushPendingDeliveryRequest` message.
+    ///
+    /// # Arguments
+    ///
+    /// * `msg` - A `PushPendingDeliveryRequest` message containing:
+    ///     - `customer_id`: the ID of the customer.
+    ///     - `restaurant_location`: the location of the restaurant.
+    ///     - `to_front`: a boolean indicating whether to insert the request at the front of the queue.
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(
         &mut self,
         msg: PushPendingDeliveryRequest,
@@ -1491,6 +1591,17 @@ impl Handler<PushPendingDeliveryRequest> for ConnectionManager {
 impl Handler<PopPendingDeliveryRequest> for ConnectionManager {
     type Result = ();
 
+    /// Removes a pending delivery request from the front of the queue and propagates the update.
+    ///
+    /// This handler performs the following actions:
+    ///
+    /// 1. Pops (removes) the pending delivery request from the front of the `pending_delivery_requests` queue.
+    /// 2. Notifies the next server peer by sending a `SendPopPendingDeliveryRequest` message.
+    ///
+    /// # Arguments
+    ///
+    /// * `_msg` - A `PopPendingDeliveryRequest` message (unused in this handler).
+    /// * `_ctx` - The actor context (unused in this handler).
     fn handle(
         &mut self,
         _msg: PopPendingDeliveryRequest,
