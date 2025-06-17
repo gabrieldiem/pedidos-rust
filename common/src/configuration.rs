@@ -29,7 +29,7 @@ pub struct SingleRestaurantInfo {
     pub name: String,
     pub port: u32,
     pub x: u16,
-    pub y: u16
+    pub y: u16,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

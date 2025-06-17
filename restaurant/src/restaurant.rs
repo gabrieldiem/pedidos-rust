@@ -2,20 +2,17 @@ use actix::{Actor, ActorContext, AsyncContext, Context, Handler};
 use actix::{Addr, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::configuration::Configuration;
-use common::constants::{DELIVERY_ACCEPT_PROBABILITY, MAX_ORDER_DURATION, MAX_ORDER_PRICE, MIN_ORDER_DURATION, MIN_ORDER_PRICE, NO_RESTAURANTS, ORDER_REJECTED_PROBABILITY};
-use common::protocol::{DeliveryOffer, DeliveryOfferConfirmed, FinishDelivery, GetRestaurants, Location, LocationUpdate, Order, OrderContent, PushNotification, SocketMessage, Stop};
+use common::constants::{MAX_ORDER_DURATION, MIN_ORDER_DURATION, ORDER_REJECTED_PROBABILITY};
+use common::protocol::{Location, SocketMessage, Stop};
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
-use rand::seq::IndexedRandom;
-use rand::{Rng, rng, random};
+use rand::Rng;
 use std::io;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, BufReader, split};
-use tokio::time::sleep;
 use tokio_stream::wrappers::LinesStream;
-
 
 #[allow(dead_code)]
 pub struct Restaurant {
@@ -26,7 +23,7 @@ pub struct Restaurant {
     my_port: u32,
     peer_port: u32,
     tcp_connector: Addr<TcpConnector>,
-    name: String
+    name: String,
 }
 
 impl Actor for Restaurant {
@@ -43,7 +40,7 @@ pub struct InformLocation;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct PrepareOrder{
+pub struct PrepareOrder {
     pub customer_id: u32,
     pub price: f64,
 }
@@ -72,16 +69,13 @@ impl Handler<Stop> for Restaurant {
 impl Handler<InformLocation> for Restaurant {
     type Result = ();
 
-    async fn handle(&mut self, msg: InformLocation, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, _msg: InformLocation, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.debug(&format!(
             "Informing my location to PedidosRust: ({}, {})",
             self.location.x, self.location.y
         ));
 
-        let msg = SocketMessage::InformLocation(
-            self.location,
-            self.name.clone(),
-        );
+        let msg = SocketMessage::InformLocation(self.location, self.name.clone());
         if let Err(e) = self.send_message(&msg) {
             self.logger.error(&e.to_string());
             return;
@@ -93,7 +87,7 @@ impl Handler<InformLocation> for Restaurant {
 impl Handler<PrepareOrder> for Restaurant {
     type Result = ();
 
-    async fn handle(&mut self, msg: PrepareOrder, ctx: &mut Self::Context) {
+    async fn handle(&mut self, msg: PrepareOrder, _ctx: &mut Self::Context) {
         self.logger.info(&format!(
             "Order received from customer {} with price {}",
             msg.customer_id, msg.price
@@ -106,10 +100,13 @@ impl Handler<PrepareOrder> for Restaurant {
         }
 
         let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
-        ctx.notify_later(ContinueOrder {
-            customer_id: msg.customer_id,
-            price: msg.price,
-        }, Duration::from_secs(secs));
+        _ctx.notify_later(
+            ContinueOrder {
+                customer_id: msg.customer_id,
+                price: msg.price,
+            },
+            Duration::from_secs(secs),
+        );
     }
 }
 
@@ -191,7 +188,7 @@ impl Restaurant {
             let tcp_sender = TcpSender {
                 write_stream: Some(write_half),
             }
-                .start();
+            .start();
 
             logger.debug("Created Restaurant");
 

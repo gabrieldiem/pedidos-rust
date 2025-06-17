@@ -4,10 +4,7 @@ use crate::messages::{
     PaymentExecuted, RegisterPaymentSystem, SendNotification,
 };
 use crate::messages::{RegisterCustomer, RegisterRestaurant, RegisterRider, SendRestaurantList};
-use actix::{
-    Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, ResponseActFuture,
-    StreamHandler, WrapFuture,
-};
+use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
@@ -39,13 +36,15 @@ pub struct SendRestaurants {
     is_new_customer: bool,
 }
 
+#[allow(clippy::unused_unit)]
 #[async_handler]
 impl Handler<SendRestaurants> for ClientConnection {
     type Result = ();
 
     async fn handle(&mut self, msg: SendRestaurants, _ctx: &mut Self::Context) -> Self::Result {
         if msg.is_new_customer {
-            let res = self.connection_manager
+            let res = self
+                .connection_manager
                 .send(RegisterCustomer {
                     id: self.id,
                     location: msg.customer_location,
@@ -54,15 +53,16 @@ impl Handler<SendRestaurants> for ClientConnection {
                 .await;
 
             if let Err(e) = res {
-                self.logger.error(&format!("Failed to register customer: {}", e));
+                self.logger
+                    .error(&format!("Failed to register customer: {}", e));
                 return;
             }
         }
         self.logger.debug("Sending Restaurants");
 
-        let res2 = self.connection_manager
-            .do_send(SendRestaurantList { customer_id: self.id });
-        
+        self.connection_manager.do_send(SendRestaurantList {
+            customer_id: self.id,
+        });
     }
 }
 
