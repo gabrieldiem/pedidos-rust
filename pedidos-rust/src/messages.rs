@@ -4,14 +4,6 @@ use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
 use common::protocol::Location;
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::net::UdpSocket;
-
-#[derive(Message, Debug)]
-#[rtype(result = "()")]
-pub struct StartHeartbeat {
-    pub udp_socket: Arc<UdpSocket>,
-}
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -204,12 +196,10 @@ pub struct GetPeers {}
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct LivenessProbe {
-    pub udp_socket: Arc<UdpSocket>,
-}
+pub struct InitLeader {}
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct LivenessEcho {
-    pub origin_port: u32,
+pub struct GotLeaderFromPeer {
+    pub leader_port: u32,
 }

@@ -235,6 +235,10 @@ pub struct SendPushPendingDeliveryRequest {
 #[rtype(result = "()")]
 pub struct SendPopPendingDeliveryRequest {}
 
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct LeaderQuery {}
+
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -276,6 +280,6 @@ pub enum SocketMessage {
     RemoveOrderInProgressData(u32),
     PushPendingDeliveryRequest(u32, Location, bool),
     PopPendingDeliveryRequest,
-    LivenessProbe,
-    LivenessEcho,
+    LeaderQuery,
+    LeaderData(u32), // u32 is leader canonical port
 }

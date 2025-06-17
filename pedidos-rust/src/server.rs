@@ -1,14 +1,14 @@
 use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{RegisterPeerServer, StartHeartbeat};
-use crate::server_peer::ServerPeer;
+use crate::messages::{InitLeader, RegisterPeerServer};
+use crate::server_peer::{ServerPeer, Start};
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
 use common::constants::DEFAULT_PR_HOST;
 use common::tcp::tcp_connector::TcpConnector;
 use common::tcp::tcp_sender::TcpSender;
-use common::utils::logger::{LogLevel, Logger};
+use common::utils::logger::Logger;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -29,8 +29,6 @@ pub struct Server {
 }
 
 impl Server {
-    const HEARTBEAT_LOG_LEVEL: LogLevel = LogLevel::Debug;
-
     pub async fn new(id: u32, logger: Logger) -> Result<Server, Box<dyn std::error::Error>> {
         let configuration = Configuration::new()?;
 
@@ -112,7 +110,7 @@ impl Server {
             self.logger
                 .info(&format!("Correctly connected to port {}", peer_port));
 
-            let peer = ServerPeer::create(|ctx| {
+            let server_peer = ServerPeer::create(|ctx| {
                 let (read_half, write_half) = split(stream);
 
                 ServerPeer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), ctx);
@@ -129,14 +127,15 @@ impl Server {
                     self.port,
                     peer_port,
                     self.connection_manager.clone(),
-                    Self::HEARTBEAT_LOG_LEVEL,
                 )
             });
 
             self.connection_manager.do_send(RegisterPeerServer {
                 id: peer_id,
-                address: peer,
+                address: server_peer.clone(),
             });
+
+            server_peer.do_send(Start {});
         }
         Ok(())
     }
@@ -169,15 +168,11 @@ impl Server {
 
         let socket_ref = socket.clone();
 
-        let mut heart_beat_logger = logger.clone();
-        heart_beat_logger.set_level(Self::HEARTBEAT_LOG_LEVEL);
-
         spawn(async move {
             if let Err(e) = ConnectionGateway::run(
                 port,
                 id,
                 logger.clone(),
-                heart_beat_logger,
                 connection_manager,
                 configuration,
                 socket_ref,
@@ -244,7 +239,6 @@ impl Server {
                 self.port,
                 peer_port,
                 self.connection_manager.clone(),
-                Self::HEARTBEAT_LOG_LEVEL,
             )
         });
 
@@ -252,6 +246,8 @@ impl Server {
             id: peer_id,
             address: server_peer.clone(),
         });
+
+        server_peer.do_send(Start {});
     }
 
     fn create_client_connection(&self, client_sockaddr: SocketAddr, stream: TcpStream) {
@@ -279,13 +275,6 @@ impl Server {
         });
     }
 
-    async fn start_heartbeats_of_peers(&self, udp_socket: Arc<UdpSocket>) {
-        let _ = self
-            .connection_manager
-            .send(StartHeartbeat { udp_socket })
-            .await;
-    }
-
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
@@ -303,12 +292,12 @@ impl Server {
         connect_server_peers_res?;
         let udp_socket = udp_socket_res?;
 
-        self.start_heartbeats_of_peers(udp_socket.clone()).await;
-
         self.logger.info(&format!(
             "Listening for connections on {}",
             sockaddr_str.clone()
         ));
+
+        self.connection_manager.do_send(InitLeader {});
 
         while let Ok((stream, connected_sockaddr)) = listener.accept().await {
             let (is_peer, peer_id) =
@@ -319,8 +308,6 @@ impl Server {
             } else {
                 self.create_client_connection(connected_sockaddr, stream);
             }
-
-            self.start_heartbeats_of_peers(udp_socket.clone()).await;
         }
 
         Ok(())

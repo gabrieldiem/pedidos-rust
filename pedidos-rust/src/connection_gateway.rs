@@ -1,5 +1,5 @@
 use crate::connection_manager::{ConnectionManager, LeaderData};
-use crate::messages::{GetLeaderInfo, IsPeerConnected, LivenessEcho};
+use crate::messages::{GetLeaderInfo, IsPeerConnected};
 use actix::Addr;
 use common::configuration::Configuration;
 use common::constants::NOT_A_PEER_PORT;
@@ -119,31 +119,10 @@ impl ConnectionGateway {
         Ok(())
     }
 
-    async fn process_liveness_probe(
-        socket: &UdpSocket,
-        addr: SocketAddr,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let msg: String = Self::serialize_message(SocketMessage::LivenessEcho)?;
-        socket.send_to(msg.as_bytes(), addr).await?;
-
-        Ok(())
-    }
-
-    async fn process_liveness_echo(
-        connection_manager: &Addr<ConnectionManager>,
-        origin_port: u32,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        match connection_manager.send(LivenessEcho { origin_port }).await {
-            Ok(_) => Ok(()),
-            Err(e) => Err(Box::new(e)),
-        }
-    }
-
     pub async fn run(
         port: u32,
         id: u32,
         logger: Logger,
-        logger_for_heart_beat: Logger,
         connection_manager: Addr<ConnectionManager>,
         configuration: Configuration,
         socket: Arc<UdpSocket>,
@@ -167,15 +146,6 @@ impl ConnectionGateway {
                                 port,
                             )
                             .await?;
-                        }
-                        SocketMessage::LivenessProbe => {
-                            logger_for_heart_beat.debug("Received liveness probe");
-                            Self::process_liveness_probe(&socket, addr).await?;
-                        }
-                        SocketMessage::LivenessEcho => {
-                            logger_for_heart_beat.debug("Received liveness echo");
-                            Self::process_liveness_echo(&connection_manager, addr.port() as u32)
-                                .await?;
                         }
                         _ => {
                             logger.warn(&format!("Unrecognized message: {:?}", received_msg));
