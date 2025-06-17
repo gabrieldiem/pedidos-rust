@@ -2,7 +2,7 @@ use crate::connection_manager::ConnectionManager;
 use crate::messages::{
     ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GotLeaderFromPeer,
     PeerDisconnected, PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData,
-    UpdateRestaurantData, UpdateRiderData,
+    UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData,
 };
 use actix::{Actor, ActorContext, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
@@ -435,6 +435,22 @@ impl ServerPeer {
                         .info(&format!("Updating data for payment system {port}"));
                     self.connection_manager
                         .do_send(UpdatePaymentSystemData { port })
+                }
+                SocketMessage::UpdateOrderInProgressData(
+                    customer_id,
+                    customer_location,
+                    order_price,
+                    rider_id,
+                ) => {
+                    self.logger.info(&format!(
+                        "Removing data for order from customer {customer_id}"
+                    ));
+                    self.connection_manager.do_send(UpdateOrderInProgressData {
+                        customer_id,
+                        customer_location,
+                        order_price,
+                        rider_id,
+                    })
                 }
                 SocketMessage::RemoveOrderInProgressData(customer_id) => {
                     self.logger.info(&format!(
