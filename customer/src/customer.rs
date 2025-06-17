@@ -149,10 +149,10 @@ impl Handler<PushNotification> for Customer {
 impl Handler<FinishDelivery> for Customer {
     type Result = ();
 
-    async fn handle(&mut self, msg: FinishDelivery, ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
         self.logger.info(msg.reason.as_str());
 
-        let addr = ctx.address();
+        let addr = _ctx.address();
         let location = self.location;
         tokio::spawn(async move {
             use tokio::io::{AsyncBufReadExt, BufReader};
