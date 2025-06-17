@@ -1,12 +1,11 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
-    IsPeerConnected, LivenessEcho, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized,
-    PaymentDenied, PaymentExecuted, PeerDisconnected, PopPendingDeliveryRequest,
-    PushPendingDeliveryRequest, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
-    RegisterRestaurant, RegisterRider, RemoveOrderInProgressData, SendNotification,
-    SendRestaurantList, StartHeartbeat, UpdateCustomerData, UpdateOrderInProgressData,
-    UpdateRestaurantData, UpdateRiderData,
+    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
+    PaymentExecuted, PeerDisconnected, PopPendingDeliveryRequest, PushPendingDeliveryRequest,
+    RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider,
+    RemoveOrderInProgressData, SendNotification, SendRestaurantList, UpdateCustomerData,
+    UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -242,38 +241,6 @@ impl Actor for ConnectionManager {
     type Context = Context<Self>;
 }
 
-impl Handler<LivenessEcho> for ConnectionManager {
-    type Result = ();
-
-    fn handle(&mut self, msg: LivenessEcho, _ctx: &mut Self::Context) -> Self::Result {
-        let origin_port = msg.origin_port;
-        let origin = self
-            .configuration
-            .pedidos_rust
-            .infos
-            .iter()
-            .find(|info| info.port == origin_port);
-
-        match origin {
-            Some(origin) => match self.server_peers.get(&origin.id) {
-                Some(peer_addr) => peer_addr.do_send(LivenessEcho { origin_port }),
-                None => {
-                    self.logger.warn(&format!(
-                        "LivenessEcho from {} did not match any registered port",
-                        origin_port
-                    ));
-                }
-            },
-            None => {
-                self.logger.warn(&format!(
-                    "LivenessEcho from {} did not match any registered port",
-                    origin_port
-                ));
-            }
-        }
-    }
-}
-
 impl Handler<PeerDisconnected> for ConnectionManager {
     type Result = ();
 
@@ -281,33 +248,6 @@ impl Handler<PeerDisconnected> for ConnectionManager {
         let peer_id = msg.peer_id;
         self.logger
             .warn(&format!("Peer with id {peer_id} disconnected"));
-    }
-}
-
-impl Handler<StartHeartbeat> for ConnectionManager {
-    type Result = ();
-
-    fn handle(&mut self, msg: StartHeartbeat, _ctx: &mut Self::Context) -> Self::Result {
-        if self.server_peers.is_empty() {
-            self.logger.info("No peer connection. Taking leader role");
-            _ctx.address().do_send(ElectionCoordinatorReceived {
-                leader_port: self.port,
-            });
-            return;
-        }
-
-        for peer_id in self.server_peers.keys() {
-            match self.server_peers.get(peer_id) {
-                Some(peer_addr) => {
-                    peer_addr.do_send(StartHeartbeat {
-                        udp_socket: msg.udp_socket.clone(),
-                    });
-                }
-                None => {
-                    self.logger.warn("No peer found");
-                }
-            };
-        }
     }
 }
 

@@ -1,7 +1,7 @@
 use crate::client_connection::ClientConnection;
 use crate::connection_gateway::ConnectionGateway;
 use crate::connection_manager::ConnectionManager;
-use crate::messages::{RegisterPeerServer, StartHeartbeat};
+use crate::messages::RegisterPeerServer;
 use crate::server_peer::ServerPeer;
 use actix::{Actor, Addr, StreamHandler};
 use common::configuration::Configuration;
@@ -129,7 +129,6 @@ impl Server {
                     self.port,
                     peer_port,
                     self.connection_manager.clone(),
-                    Self::HEARTBEAT_LOG_LEVEL,
                 )
             });
 
@@ -177,7 +176,6 @@ impl Server {
                 port,
                 id,
                 logger.clone(),
-                heart_beat_logger,
                 connection_manager,
                 configuration,
                 socket_ref,
@@ -244,7 +242,6 @@ impl Server {
                 self.port,
                 peer_port,
                 self.connection_manager.clone(),
-                Self::HEARTBEAT_LOG_LEVEL,
             )
         });
 
@@ -279,13 +276,6 @@ impl Server {
         });
     }
 
-    async fn start_heartbeats_of_peers(&self, udp_socket: Arc<UdpSocket>) {
-        let _ = self
-            .connection_manager
-            .send(StartHeartbeat { udp_socket })
-            .await;
-    }
-
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let sockaddr_str = format!("{}:{}", DEFAULT_PR_HOST, self.port);
         let listener = TcpListener::bind(sockaddr_str.clone()).await.unwrap();
@@ -303,8 +293,6 @@ impl Server {
         connect_server_peers_res?;
         let udp_socket = udp_socket_res?;
 
-        self.start_heartbeats_of_peers(udp_socket.clone()).await;
-
         self.logger.info(&format!(
             "Listening for connections on {}",
             sockaddr_str.clone()
@@ -319,8 +307,6 @@ impl Server {
             } else {
                 self.create_client_connection(connected_sockaddr, stream);
             }
-
-            self.start_heartbeats_of_peers(udp_socket.clone()).await;
         }
 
         Ok(())
