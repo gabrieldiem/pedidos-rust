@@ -452,6 +452,7 @@ pub struct Restaurant {
     peer_port: u32,
     tcp_connector: Addr<TcpConnector>,
     name: String,
+    udp_socket: Arc<UdpSocket>,
 }
 ```
 
