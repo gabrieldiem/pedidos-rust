@@ -427,6 +427,6 @@ impl StreamHandler<Result<String, io::Error>> for Customer {
     }
 
     fn finished(&mut self, _ctx: &mut Self::Context) {
-        self.logger.warn("Detected with PedidosRust");
+        self.logger.warn("Detected PedidosRust connection down");
     }
 }

@@ -189,7 +189,7 @@ pub struct ElectionOk {}
 #[rtype(result = "()")]
 pub struct ElectionCoordinator {}
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct SendUpdateCustomerData {
     pub customer_id: u32,
@@ -197,21 +197,21 @@ pub struct SendUpdateCustomerData {
     pub order_price: Option<f64>,
 }
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct SendUpdateRestaurantData {
     pub restaurant_name: String,
     pub location: Location,
 }
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct SendUpdateRiderData {
     pub rider_id: u32,
     pub location: Option<Location>,
 }
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct SendUpdateOrderInProgressData {
     pub customer_id: u32,
@@ -226,7 +226,7 @@ pub struct SendRemoveOrderInProgressData {
     pub customer_id: u32,
 }
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct SendPushPendingDeliveryRequest {
     pub customer_id: u32,
@@ -234,7 +234,7 @@ pub struct SendPushPendingDeliveryRequest {
     pub to_front: bool,
 }
 
-#[derive(Message, Serialize, Deserialize, Debug)]
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
 pub struct SendPopPendingDeliveryRequest {}
 

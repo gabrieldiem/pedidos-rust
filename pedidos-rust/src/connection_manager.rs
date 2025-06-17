@@ -113,6 +113,60 @@ impl RestaurantData {
 
 pub type PeerId = u32;
 
+#[derive(Clone)]
+#[allow(clippy::enum_variant_names)]
+pub enum HistoricalMessage {
+    SendUpdateCustomerData(SendUpdateCustomerData),
+    SendUpdateRestaurantData(SendUpdateRestaurantData),
+    SendUpdateRiderData(SendUpdateRiderData),
+    SendUpdateOrderInProgressData(SendUpdateOrderInProgressData),
+    SendPushPendingDeliveryRequest(SendPushPendingDeliveryRequest),
+    SendPopPendingDeliveryRequest(SendPopPendingDeliveryRequest),
+    SendRemoveOrderInProgressData(SendRemoveOrderInProgressData),
+}
+
+impl From<SendUpdateCustomerData> for HistoricalMessage {
+    fn from(msg: SendUpdateCustomerData) -> Self {
+        HistoricalMessage::SendUpdateCustomerData(msg)
+    }
+}
+
+impl From<SendUpdateRestaurantData> for HistoricalMessage {
+    fn from(msg: SendUpdateRestaurantData) -> Self {
+        HistoricalMessage::SendUpdateRestaurantData(msg)
+    }
+}
+
+impl From<SendUpdateRiderData> for HistoricalMessage {
+    fn from(msg: SendUpdateRiderData) -> Self {
+        HistoricalMessage::SendUpdateRiderData(msg)
+    }
+}
+
+impl From<SendUpdateOrderInProgressData> for HistoricalMessage {
+    fn from(msg: SendUpdateOrderInProgressData) -> Self {
+        HistoricalMessage::SendUpdateOrderInProgressData(msg)
+    }
+}
+
+impl From<SendPushPendingDeliveryRequest> for HistoricalMessage {
+    fn from(msg: SendPushPendingDeliveryRequest) -> Self {
+        HistoricalMessage::SendPushPendingDeliveryRequest(msg)
+    }
+}
+
+impl From<SendPopPendingDeliveryRequest> for HistoricalMessage {
+    fn from(msg: SendPopPendingDeliveryRequest) -> Self {
+        HistoricalMessage::SendPopPendingDeliveryRequest(msg)
+    }
+}
+
+impl From<SendRemoveOrderInProgressData> for HistoricalMessage {
+    fn from(msg: SendRemoveOrderInProgressData) -> Self {
+        HistoricalMessage::SendRemoveOrderInProgressData(msg)
+    }
+}
+
 /// Manages all the client connections and inter-server communications, and holds
 /// the current data of the system
 ///
@@ -168,6 +222,7 @@ pub struct ConnectionManager {
 
     pub orders_in_process: HashMap<CustomerId, OrderData>,
     pub pending_delivery_requests: VecDeque<FindRider>,
+    pub historical_state: Vec<HistoricalMessage>,
 
     // Peers
     pub next_server_peer: Option<(PeerId, Addr<ServerPeer>)>,
@@ -202,6 +257,7 @@ impl ConnectionManager {
             next_server_peer: None,
             election_in_progress: false,
             udp_socket,
+            historical_state: Vec::new(),
         }
     }
 
@@ -267,12 +323,14 @@ impl ConnectionManager {
     /// # Arguments
     ///
     /// * `msg` - The message to send to the next server peer.
-    fn send_message_to_next_peer<M>(&self, msg: M)
+    fn send_message_to_next_peer<M>(&mut self, msg: M)
     where
-        M: actix::Message + Send + 'static,
+        M: actix::Message<Result = ()> + Send + 'static + Clone + Into<HistoricalMessage>,
         <M as actix::Message>::Result: Send,
         ServerPeer: Handler<M>,
     {
+        self.historical_state.push(msg.clone().into());
+
         if let Some(LeaderData { id: leader_id, .. }) = self.leader {
             if let Some((next_peer_id, peer)) = &self.next_server_peer {
                 if leader_id != *next_peer_id {
@@ -715,6 +773,23 @@ impl Handler<RegisterPeerServer> for ConnectionManager {
             .entry(msg.id)
             .or_insert(peer_address.clone());
 
+        self.logger.info(&format!(
+            "Informing peer of all {} historical messages",
+            self.historical_state.len()
+        ));
+
+        for message in self.historical_state.clone() {
+            match message {
+                HistoricalMessage::SendUpdateCustomerData(msg) => peer_address.do_send(msg),
+                HistoricalMessage::SendUpdateRestaurantData(msg) => peer_address.do_send(msg),
+                HistoricalMessage::SendUpdateRiderData(msg) => peer_address.do_send(msg),
+                HistoricalMessage::SendUpdateOrderInProgressData(msg) => peer_address.do_send(msg),
+                HistoricalMessage::SendPushPendingDeliveryRequest(msg) => peer_address.do_send(msg),
+                HistoricalMessage::SendPopPendingDeliveryRequest(msg) => peer_address.do_send(msg),
+                HistoricalMessage::SendRemoveOrderInProgressData(msg) => peer_address.do_send(msg),
+            }
+        }
+
         self.update_next_peer();
         self.process_pending_requests();
     }
@@ -896,14 +971,15 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                         data: restaurant_list,
                     }),
                     None => {
-                        self.logger
-                            .warn("Failed to find customer data when sending restaurant list");
+                        self.logger.warn(
+                            "Failed to find customer data when sending restaurant list inner",
+                        );
                     }
                 }
             }
             None => {
                 self.logger
-                    .warn("Failed to find customer data when sending restaurant list");
+                    .warn("Failed to find customer data when sending restaurant list outer");
             }
         }
         self.process_pending_requests();
@@ -1513,7 +1589,9 @@ impl Handler<PaymentExecuted> for ConnectionManager {
             msg.customer_id, msg.amount
         ));
 
-        if let Some(customer_adress) = self.customer_connections.get(&msg.customer_id) {
+        let res = self.customer_connections.get(&msg.customer_id);
+
+        if let Some(customer_adress) = res.cloned() {
             self.orders_in_process.remove(&msg.customer_id);
             self.send_message_to_next_peer(SendRemoveOrderInProgressData {
                 customer_id: msg.customer_id,
