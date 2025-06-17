@@ -1264,6 +1264,12 @@ impl Handler<OrderReady> for ConnectionManager {
             customer_adress.do_send(PushNotification {
                 notification_msg: notification_msg.to_string(),
             });
+            // Quitar del hashmap restaurants la pending_order
+            for restaurant_data in self.restaurants.values_mut() {
+                restaurant_data
+                    .pending_orders
+                    .retain(|order| order.customer_id != msg.customer_id);
+            }
             self.logger
                 .debug(&format!("Finding a rider for customer {}", msg.customer_id));
             ctx.address().do_send(FindRider {
