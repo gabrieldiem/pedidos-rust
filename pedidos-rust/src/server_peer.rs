@@ -1,13 +1,13 @@
 use crate::connection_manager::ConnectionManager;
 use crate::messages::{
-    ElectionCallReceived, ElectionCoordinatorReceived, PeerDisconnected,
-    PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData,
+    ElectionCallReceived, ElectionCoordinatorReceived, GetLeaderInfo, GotLeaderFromPeer,
+    PeerDisconnected, PushPendingDeliveryRequest, RemoveOrderInProgressData, UpdateCustomerData,
     UpdateRestaurantData, UpdateRiderData,
 };
-use actix::{Actor, Addr, AsyncContext, Context, Handler, StreamHandler};
+use actix::{Actor, Addr, AsyncContext, Context, Handler, Message, StreamHandler};
 use actix_async_handler::async_handler;
 use common::protocol::{
-    ElectionCall, ElectionCoordinator, ElectionOk, SendPopPendingDeliveryRequest,
+    ElectionCall, ElectionCoordinator, ElectionOk, LeaderQuery, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
     SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
 };
@@ -16,7 +16,20 @@ use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::io;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::UdpSocket;
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct Start {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct SendLeader {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct GotLeaderOrCallElection {}
 
 #[allow(dead_code)]
 pub struct ServerPeer {
@@ -28,6 +41,84 @@ pub struct ServerPeer {
     pub host_id: u32,
     pub connection_manager: Addr<ConnectionManager>,
     pub udp_socket: Option<Arc<UdpSocket>>,
+}
+
+#[async_handler]
+impl Handler<LeaderQuery> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: LeaderQuery, _ctx: &mut Self::Context) -> Self::Result {
+        let msg_to_send = SocketMessage::LeaderQuery;
+        self.logger.debug("Querying for leader");
+
+        if let Err(e) = self.send_message(&msg_to_send) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<SendLeader> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: SendLeader, _ctx: &mut Self::Context) -> Self::Result {
+        let res_fut = self.connection_manager.send(GetLeaderInfo {}).await;
+
+        if let Ok(Ok(leader_data)) = res_fut {
+            match leader_data {
+                Some(leader_data) => {
+                    let msg_to_send = SocketMessage::LeaderData(leader_data.port);
+                    self.logger.debug("Sending leader info");
+
+                    if let Err(e) = self.send_message(&msg_to_send) {
+                        self.logger.error(&e.to_string());
+                        return;
+                    }
+                }
+                None => {
+                    self.logger.debug("I don't know the leader");
+                }
+            }
+        };
+    }
+}
+
+#[async_handler]
+impl Handler<GotLeaderOrCallElection> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        _msg: GotLeaderOrCallElection,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        let res_fut = self.connection_manager.send(GetLeaderInfo {}).await;
+
+        if let Ok(Ok(leader_data)) = res_fut {
+            match leader_data {
+                Some(_leader_data) => {
+                    self.logger.debug("Leader already found");
+                }
+                None => {
+                    self.logger.debug("Leader not found. Calling elections");
+                    _ctx.address().do_send(ElectionCall {});
+                }
+            }
+        };
+    }
+}
+
+#[async_handler]
+impl Handler<Start> for ServerPeer {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
+        self.logger.debug("Starting peer");
+
+        self.connection_manager.do_send(LeaderQuery {});
+        _ctx.notify_later(GotLeaderOrCallElection {}, Duration::from_secs(2));
+    }
 }
 
 #[async_handler]
@@ -329,6 +420,13 @@ impl ServerPeer {
                         restaurant_location,
                         to_front,
                     })
+                }
+                SocketMessage::LeaderQuery => {
+                    ctx.address().do_send(SendLeader {});
+                }
+                SocketMessage::LeaderData(leader_port) => {
+                    self.connection_manager
+                        .do_send(GotLeaderFromPeer { leader_port });
                 }
                 _ => {
                     self.logger

@@ -193,3 +193,13 @@ pub struct GetLeaderInfo {}
 #[derive(Message, Debug)]
 #[rtype(result = "Result<HashMap<PeerId, Addr<ServerPeer>>, ()>")]
 pub struct GetPeers {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct InitLeader {}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct GotLeaderFromPeer {
+    pub leader_port: u32,
+}

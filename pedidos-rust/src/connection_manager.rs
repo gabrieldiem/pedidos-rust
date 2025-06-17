@@ -1,11 +1,12 @@
 use crate::client_connection::ClientConnection;
 use crate::messages::{
     AuthorizePayment, ElectionCoordinatorReceived, FindRider, GetLeaderInfo, GetPeers,
-    IsPeerConnected, OrderCancelled, OrderReady, OrderRequest, PaymentAuthorized, PaymentDenied,
-    PaymentExecuted, PeerDisconnected, PopPendingDeliveryRequest, PushPendingDeliveryRequest,
-    RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer, RegisterRestaurant, RegisterRider,
-    RemoveOrderInProgressData, SendNotification, SendRestaurantList, UpdateCustomerData,
-    UpdateOrderInProgressData, UpdateRestaurantData, UpdateRiderData,
+    GotLeaderFromPeer, InitLeader, IsPeerConnected, OrderCancelled, OrderReady, OrderRequest,
+    PaymentAuthorized, PaymentDenied, PaymentExecuted, PeerDisconnected, PopPendingDeliveryRequest,
+    PushPendingDeliveryRequest, RegisterCustomer, RegisterPaymentSystem, RegisterPeerServer,
+    RegisterRestaurant, RegisterRider, RemoveOrderInProgressData, SendNotification,
+    SendRestaurantList, UpdateCustomerData, UpdateOrderInProgressData, UpdateRestaurantData,
+    UpdateRiderData,
 };
 use crate::nearby_entitys::NearbyEntities;
 use crate::server_peer::ServerPeer;
@@ -16,10 +17,10 @@ use common::constants::{N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
-    Location, LocationUpdateForRider, OrderToRestaurant, PushNotification, Restaurants,
-    RiderArrivedAtCustomer, SendPopPendingDeliveryRequest, SendPushPendingDeliveryRequest,
-    SendRemoveOrderInProgressData, SendUpdateCustomerData, SendUpdateOrderInProgressData,
-    SendUpdateRestaurantData, SendUpdateRiderData,
+    LeaderQuery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification,
+    Restaurants, RiderArrivedAtCustomer, SendPopPendingDeliveryRequest,
+    SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
+    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData,
 };
 use common::utils::logger::Logger;
 use std::collections::{HashMap, VecDeque};
@@ -241,10 +242,48 @@ impl Actor for ConnectionManager {
     type Context = Context<Self>;
 }
 
+#[async_handler]
+impl Handler<LeaderQuery> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: LeaderQuery, _ctx: &mut Self::Context) -> Self::Result {
+        for peer_id in self.server_peers.keys() {
+            match self.server_peers.get(peer_id) {
+                Some(peer_addr) => {
+                    peer_addr.do_send(LeaderQuery {});
+                }
+                None => {
+                    self.logger.warn("No peer found");
+                }
+            };
+        }
+    }
+}
+
+#[async_handler]
+impl Handler<InitLeader> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: InitLeader, _ctx: &mut Self::Context) -> Self::Result {
+        if self.server_peers.is_empty() {
+            self.logger.info(&format!(
+                "No peers present. Taking the leader role with ID {}",
+                self.id
+            ));
+
+            self.leader = Some(LeaderData {
+                id: self.id,
+                port: self.port,
+            });
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<PeerDisconnected> for ConnectionManager {
     type Result = ();
 
-    fn handle(&mut self, msg: PeerDisconnected, _ctx: &mut Self::Context) -> Self::Result {
+    async fn handle(&mut self, msg: PeerDisconnected, _ctx: &mut Self::Context) -> Self::Result {
         let peer_id = msg.peer_id;
         self.logger
             .warn(&format!("Peer with id {peer_id} disconnected"));
@@ -257,6 +296,39 @@ impl Handler<GetPeers> for ConnectionManager {
 
     async fn handle(&mut self, _msg: GetPeers, _ctx: &mut Self::Context) -> Self::Result {
         Ok(self.server_peers.clone())
+    }
+}
+
+#[async_handler]
+impl Handler<GotLeaderFromPeer> for ConnectionManager {
+    type Result = ();
+
+    async fn handle(&mut self, msg: GotLeaderFromPeer, _ctx: &mut Self::Context) -> Self::Result {
+        self.election_in_progress = false;
+        let leader_port = msg.leader_port;
+
+        let info = self
+            .configuration
+            .pedidos_rust
+            .infos
+            .iter()
+            .find(|pair| pair.port == leader_port);
+
+        match info {
+            Some(info) => {
+                self.leader = Some(LeaderData {
+                    id: info.id,
+                    port: leader_port,
+                });
+                self.logger.debug(&format!(
+                    "Found leader from peer. Leader is {} with ID {}",
+                    leader_port, info.id
+                ));
+            }
+            None => self
+                .logger
+                .debug(&format!("No info for port {leader_port}")),
+        }
     }
 }
 
