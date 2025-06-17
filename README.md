@@ -312,6 +312,43 @@ Para garantizar la detección de desconexiones de riders y restaurantes, habrá 
 
 ## Cambios realizados
 
+## Uso
+
+Se deja las instrucciones para ejecutar las diversas apps:
+
+**Customer:**
+
+```bash
+cargo run -p customer <id> 
+```
+
+**Payment-System:**
+
+```bash
+cargo run -p payment-system
+```
+
+**Pedidos-rust:**
+
+```bash
+cargo run -p pedidos-rust <id>
+```
+
+**Restaurant:**
+
+```bash
+cargo run -p restaurant <id>
+```
+
+**Rider:**
+
+```bash
+cargo run -p rider <id>
+```
+
+---
+
+
 #### Mensajes
 
 | Mensaje                      | Emisor                      | Receptor                    | Payload                                                                 | Propósito                                                                                                         |
