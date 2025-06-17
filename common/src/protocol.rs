@@ -1,8 +1,22 @@
+use std::collections::VecDeque;
+
 use crate::tcp::tcp_sender::TcpSender;
 use actix::{Addr, Message};
 use serde::{Deserialize, Serialize};
 use tokio::io::ReadHalf;
 use tokio::net::TcpStream;
+
+/// `OrderData` holds the information about current, unfinished orders.
+///
+/// Contains the ID of the Rider and of the Customer, the order price if it has been
+/// set, and the location of the Customer
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct OrderData {
+    pub rider_id: Option<u32>,
+    pub order_price: Option<f64>,
+    pub customer_location: Location,
+    pub customer_id: u32,
+}
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -201,6 +215,7 @@ pub struct SendUpdateCustomerData {
 pub struct SendUpdateRestaurantData {
     pub restaurant_name: String,
     pub location: Location,
+    pub pending_orders: VecDeque<OrderData>,
 }
 
 #[derive(Message, Serialize, Deserialize, Debug, Clone)]
@@ -302,7 +317,7 @@ pub enum SocketMessage {
     ElectionOk,
     ElectionCoordinator,
     UpdateCustomerData(u32, Location, Option<f64>),
-    UpdateRestaurantData(String, Location),
+    UpdateRestaurantData(String, Location, VecDeque<OrderData>),
     UpdateRiderData(u32, Option<Location>),
     UpdateOrderInProgressData(u32, Location, Option<f64>, Option<u32>),
     RemoveOrderInProgressData(u32),
