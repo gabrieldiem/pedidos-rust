@@ -100,5 +100,37 @@
         "y": 18
       }
     ]
+  },
+  "restaurant": {
+    "infos": [
+      {
+        "id": 1,
+        "name": "Mostaza",
+        "port": 7801,
+        "x": 11,
+        "y": 11
+      },
+      {
+        "id": 2,
+        "name": "Burger King",
+        "port": 7802,
+        "x": 21,
+        "y": 21
+      },
+      {
+        "id": 3,
+        "name": "Green Eat",
+        "port": 7803,
+        "x": 6,
+        "y": 6
+      },
+      {
+        "id": 4,
+        "name": "La Farola",
+        "port": 7804,
+        "x": 16,
+        "y": 16
+      }
+    ]
   }
 }

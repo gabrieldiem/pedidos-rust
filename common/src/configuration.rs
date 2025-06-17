@@ -24,6 +24,15 @@ pub struct SingleRiderInfo {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct SingleRestaurantInfo {
+    pub id: u32,
+    pub name: String,
+    pub port: u32,
+    pub x: u16,
+    pub y: u16
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct PedidosRustConfig {
     pub infos: Vec<SinglePedidosRustInfo>,
 }
@@ -39,10 +48,16 @@ pub struct CustomerConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct RestaurantConfig {
+    pub infos: Vec<SingleRestaurantInfo>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Configuration {
     pub pedidos_rust: PedidosRustConfig,
     pub customer: CustomerConfig,
     pub rider: RiderConfig,
+    pub restaurant: RestaurantConfig,
 }
 
 impl Configuration {
