@@ -243,7 +243,7 @@ impl Rider {
             ));
             Rider {
                 tcp_sender,
-                logger: Logger::new(Some("[CUSTOMER]")),
+                logger: Logger::new(Some("[RIDER]")),
                 location: rider_location,
                 config,
                 my_port,
