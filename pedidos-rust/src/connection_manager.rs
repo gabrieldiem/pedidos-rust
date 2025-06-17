@@ -139,7 +139,7 @@ pub type PeerId = u32;
 /// ## Server Peers
 ///
 /// * `next_server_peer` - Information about the next peer server in the network (if any). Used for data transfers
-/// between replicas of the PedidosRust application.
+///   between replicas of the PedidosRust application.
 /// * `server_peers` - A mapping of peer IDs to their associated server peer actor addresses.
 /// * `leader` - Information about the current leader server (if any).
 /// * `election_in_progress` - A flag indicating whether a leader election is currently underway.
