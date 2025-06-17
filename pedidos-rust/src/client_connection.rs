@@ -38,9 +38,7 @@ pub struct SendRestaurants {
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
-pub struct ClientDisconnected {
-    
-}
+pub struct ClientDisconnected {}
 
 #[async_handler]
 impl Handler<ClientDisconnected> for ClientConnection {
@@ -115,7 +113,6 @@ impl Handler<RegisterNewRestaurant> for ClientConnection {
         self.logger.debug("New restaurant registered");
     }
 }
-
 
 #[async_handler]
 impl Handler<Restaurants> for ClientConnection {
