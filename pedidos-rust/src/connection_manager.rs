@@ -771,7 +771,7 @@ impl Handler<RegisterRider> for ConnectionManager {
     async fn handle(&mut self, msg: RegisterRider, _ctx: &mut Self::Context) -> Self::Result {
         self.logger
             .debug(&format!("Registering Rider with ID {}", msg.id));
-        self.rider_connections.entry(msg.id).or_insert(msg.address);
+        self.rider_connections.insert(msg.id, msg.address);
         self.riders.entry(msg.id).or_insert(RiderData {
             location: Some(msg.location),
         });
@@ -800,8 +800,7 @@ impl Handler<RegisterCustomer> for ConnectionManager {
             .entry(msg.id)
             .or_insert(CustomerData::new(msg.location, None));
         self.customer_connections
-            .entry(msg.id)
-            .or_insert(msg.address);
+            .insert(msg.id, msg.address.clone());
         self.send_message_to_next_peer(SendUpdateCustomerData {
             customer_id: msg.id,
             location: msg.location,
