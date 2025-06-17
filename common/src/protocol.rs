@@ -281,5 +281,6 @@ pub enum SocketMessage {
     PushPendingDeliveryRequest(u32, Location, bool),
     PopPendingDeliveryRequest,
     LeaderQuery,
-    LeaderData(u32), // u32 is leader canonical port
+    LeaderData(u32),               // u32 is leader canonical port
+    ReconnectionMandate(u32, u32), // (u32, u32) = (new_leader_id, new_leader_port)
 }
