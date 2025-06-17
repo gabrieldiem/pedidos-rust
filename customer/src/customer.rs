@@ -31,6 +31,7 @@ pub struct Customer {
     peer_port: u32,
     tcp_connector: Addr<TcpConnector>,
     udp_socket: Arc<UdpSocket>,
+    is_new_customer: bool,
 }
 
 impl Actor for Customer {
@@ -52,9 +53,9 @@ impl Handler<Start> for Customer {
     type Result = ();
 
     async fn handle(&mut self, _msg: Start, _ctx: &mut Self::Context) -> Self::Result {
+        self.is_new_customer = true;
         _ctx.address().do_send(GetRestaurants {
             customer_location: self.location,
-            new_customer: true,
         });
     }
 }
@@ -79,7 +80,7 @@ impl Handler<GetRestaurants> for Customer {
 
         if let Err(e) = self.send_message(&SocketMessage::GetRestaurants(
             msg.customer_location,
-            msg.new_customer,
+            self.is_new_customer,
         )) {
             self.logger.error(&e.to_string());
         }
@@ -179,7 +180,8 @@ impl Handler<SetupReconnection> for Customer {
         Customer::add_stream(LinesStream::new(BufReader::new(read_half).lines()), _ctx);
         self.tcp_sender = tcp_sender;
 
-        self.logger.info("Reconnection established")
+        self.logger.info("Reconnection established");
+        self.is_new_customer = true;
     }
 }
 
@@ -237,6 +239,7 @@ impl Handler<FinishDelivery> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
+        self.is_new_customer = false;
         self.logger.info(msg.reason.as_str());
 
         let addr = _ctx.address();
@@ -256,7 +259,6 @@ impl Handler<FinishDelivery> for Customer {
                 } else {
                     addr.do_send(GetRestaurants {
                         customer_location: location,
-                        new_customer: false,
                     });
                 }
             }
@@ -349,6 +351,7 @@ impl Customer {
                 peer_port: peer_port as u32,
                 tcp_connector: tcp_connector_actor,
                 udp_socket,
+                is_new_customer: true,
             }
         });
         Ok(customer)
