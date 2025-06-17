@@ -16,9 +16,7 @@ use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
 use common::utils::logger::Logger;
 use std::io;
-use std::sync::Arc;
 use std::time::Duration;
-use tokio::net::UdpSocket;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -41,7 +39,6 @@ pub struct ServerPeer {
     pub id: u32,
     pub host_id: u32,
     pub connection_manager: Addr<ConnectionManager>,
-    pub udp_socket: Option<Arc<UdpSocket>>,
 }
 
 #[allow(clippy::unused_unit)]
@@ -55,7 +52,6 @@ impl Handler<Stop> for ServerPeer {
             self.logger.debug("Stopping TCP sender of peer");
             let _ = self.tcp_sender.send(Stop {}).await;
         }
-        self.udp_socket = None;
         _ctx.stop();
     }
 }
@@ -374,7 +370,6 @@ impl ServerPeer {
             port,
             peer_port,
             connection_manager,
-            udp_socket: None,
         }
     }
 

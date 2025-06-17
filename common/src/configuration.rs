@@ -39,7 +39,7 @@ pub struct PedidosRustConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RiderConfig {
-    pub infos: Vec<SingleCustomerInfo>,
+    pub infos: Vec<SingleRiderInfo>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

@@ -312,6 +312,11 @@ Para garantizar la detección de desconexiones de riders y restaurantes, habrá 
 
 ## Cambios realizados
 
+Algunas consideraciones:
+- Las ofertas de delivery se envian al top N_RIDERS_TO_NOTIFY de repartidores más cercanos al restaurante. Esta es una constante que se puede configurar. De esta forma, se evita enviar mensajes innecesarios.
+- Al customer se le envían únicamente los restaurantes más cercanos a su ubicación, y no todos los restaurantes disponibles. Esto se hizo para simular a las aplicaciones de delivery reales.
+- Las instancias del servidor PedidosRust, además de los clientes, restaurantes y repartidores se encuentran en el archivo `config.json`, donde se pueden configurar sus ubicaciones y otros parámetros. 
+
 ## Uso
 
 Se deja las instrucciones para ejecutar las diversas apps:
