@@ -54,7 +54,6 @@ pub struct RiderData {
     pub location: Option<Location>,
 }
 
-
 /// `OrderData` holds the information about current, unfinished orders.
 ///
 /// Contains the ID of the Rider and of the Customer, the order price if it has been
@@ -245,7 +244,7 @@ impl Actor for ConnectionManager {
 
 impl Handler<LivenessEcho> for ConnectionManager {
     type Result = ();
-    
+
     fn handle(&mut self, msg: LivenessEcho, _ctx: &mut Self::Context) -> Self::Result {
         let origin_port = msg.origin_port;
         let origin = self
