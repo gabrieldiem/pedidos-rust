@@ -36,6 +36,23 @@ pub struct SendRestaurants {
     is_new_customer: bool,
 }
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct ClientDisconnected {
+    
+}
+
+#[async_handler]
+impl Handler<ClientDisconnected> for ClientConnection {
+    type Result = ();
+
+    async fn handle(&mut self, _msg: ClientDisconnected, _ctx: &mut Self::Context) -> Self::Result {
+        self.tcp_sender.do_send(Stop {});
+
+        _ctx.stop();
+    }
+}
+
 #[allow(clippy::unused_unit)]
 #[async_handler]
 impl Handler<SendRestaurants> for ClientConnection {
@@ -98,6 +115,7 @@ impl Handler<RegisterNewRestaurant> for ClientConnection {
         self.logger.debug("New restaurant registered");
     }
 }
+
 
 #[async_handler]
 impl Handler<Restaurants> for ClientConnection {
@@ -481,5 +499,11 @@ impl StreamHandler<Result<String, io::Error>> for ClientConnection {
                     .error(&format!("Failed to read from stream: {}", e));
             }
         }
+    }
+
+    fn finished(&mut self, _ctx: &mut Self::Context) {
+        self.logger
+            .warn(&format!("Detected peer with id {} down", self.id));
+        _ctx.address().do_send(ClientDisconnected {});
     }
 }
