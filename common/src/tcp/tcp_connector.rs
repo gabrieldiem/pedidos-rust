@@ -3,6 +3,7 @@ use crate::protocol::{SocketMessage, UNKNOWN_LEADER};
 use crate::utils::logger::Logger;
 use actix::{Actor, Context};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
 use tokio::net::{TcpSocket, TcpStream, UdpSocket};
 
 pub struct TcpConnector {
@@ -83,6 +84,44 @@ impl TcpConnector {
             }
         };
 
+        for _ in 0..Self::MAX_CONNECTION_PASSES {
+            for port in self.dest_ports.clone() {
+                let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);
+                self.logger
+                    .debug(&format!("Trying to connect to {}", server_sockaddr));
+                match Self::try_connection(port, &socket, &self.logger.clone()).await {
+                    Ok(port) => {
+                        if port == UNKNOWN_LEADER {
+                            self.logger
+                                .debug("Port referal failed, it does not know the leader");
+                            continue;
+                        }
+
+                        self.logger
+                            .debug(&format!("Found port to connect to: {}", port));
+
+                        if (self.check_liveness(port, &socket).await).is_err() {
+                            continue;
+                        }
+                        return self.finish_connection(port).await;
+                    }
+                    Err(e) => {
+                        self.logger
+                            .warn(&format!("Failed to connect to port {}: {}", port, e));
+                    }
+                }
+            }
+
+            self.logger.info("Trying to connect again");
+        }
+
+        Err("Could not connect to any server".into())
+    }
+
+    pub async fn connect_with_socket(
+        &self,
+        socket: Arc<UdpSocket>,
+    ) -> Result<TcpStream, Box<dyn std::error::Error>> {
         for _ in 0..Self::MAX_CONNECTION_PASSES {
             for port in self.dest_ports.clone() {
                 let server_sockaddr = format!("{}:{}", DEFAULT_PR_HOST, port);

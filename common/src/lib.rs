@@ -6,4 +6,5 @@ pub mod configuration;
 pub mod constants;
 pub mod protocol;
 pub mod tcp;
+pub mod udp_gateway;
 pub mod utils;

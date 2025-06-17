@@ -1,7 +1,9 @@
 use crate::customer::{Customer, Start};
 use actix::Addr;
+use common::udp_gateway::{InfoForUdpGatewayRequest, UdpGateway};
 use common::utils::logger::Logger;
 use std::{env, process};
+use tokio::spawn;
 
 mod customer;
 
@@ -22,11 +24,31 @@ fn parse_args() -> u32 {
     }
 }
 
-async fn run(customer: Addr<Customer>) -> std::io::Result<()> {
+async fn run(customer: Addr<Customer>, logger: Logger) -> std::io::Result<()> {
     match customer.send(Start).await {
         Ok(_) => {}
         Err(e) => eprintln!("Could not start actor: {e}"),
     }
+
+    spawn(async move {
+        let data_res = customer.send(InfoForUdpGatewayRequest {}).await;
+        match data_res {
+            Ok(data) => {
+                if let Err(e) = UdpGateway::run::<Customer>(
+                    data.port,
+                    logger.clone(),
+                    customer,
+                    data.configuration,
+                    data.udp_socket,
+                )
+                .await
+                {
+                    logger.error(&format!("Connection gateway error during loop: {}", e));
+                }
+            }
+            Err(e) => eprintln!("Could not start UdpGateway: {e}"),
+        }
+    });
 
     actix_rt::signal::ctrl_c().await
 }
@@ -38,7 +60,7 @@ async fn main() {
 
     match Customer::new(id, logger.clone()).await {
         Ok(customer) => {
-            if let Err(error) = run(customer).await {
+            if let Err(error) = run(customer, logger.clone()).await {
                 logger.error(&format!("Customer failed: {error}"));
             }
         }

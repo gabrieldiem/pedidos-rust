@@ -1,5 +1,8 @@
-use actix::Message;
+use crate::tcp::tcp_sender::TcpSender;
+use actix::{Addr, Message};
 use serde::{Deserialize, Serialize};
+use tokio::io::ReadHalf;
+use tokio::net::TcpStream;
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -238,6 +241,20 @@ pub struct SendPopPendingDeliveryRequest {}
 #[derive(Message, Serialize, Deserialize, Debug)]
 #[rtype(result = "()")]
 pub struct LeaderQuery {}
+
+#[derive(Message, Serialize, Deserialize, Debug)]
+#[rtype(result = "()")]
+pub struct ReconnectToNewPedidosRust {
+    pub new_id: u32,
+    pub new_port: u32,
+}
+
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct SetupReconnection {
+    pub tcp_sender: Addr<TcpSender>,
+    pub read_half: ReadHalf<TcpStream>,
+}
 
 pub const UNKNOWN_LEADER: u32 = 0;
 
