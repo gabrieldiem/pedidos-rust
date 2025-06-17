@@ -413,7 +413,6 @@ dependencies = [
  "actix-rt",
  "actix_async_handler",
  "common",
- "futures",
  "log",
  "serde",
  "serde_json",

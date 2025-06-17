@@ -39,46 +39,30 @@ pub struct SendRestaurants {
     is_new_customer: bool,
 }
 
-// No uso #[async_handler] porque, al hacer dos llamadas a send . await hay múltiples combinaciones
-// de futures de Actix dentro de un async fn, y eso no puede resolverse bien en tiempo de
-// compilación porque no implementan el trait ActorFuture. El #[async_handler] es como un decorator
-// pero tiene limitaciones en cuanto a la complejidad de los futures que se pueden usar dentro de él.
-// Por eso, uso el Box::pin(fut.into_actor(self)) para poder usar múltiples futures dentro de un async fn.
+#[async_handler]
 impl Handler<SendRestaurants> for ClientConnection {
-    type Result = ResponseActFuture<Self, ()>;
+    type Result = ();
 
-    fn handle(&mut self, msg: SendRestaurants, ctx: &mut Self::Context) -> Self::Result {
-        let addr = ctx.address();
-        let logger = self.logger.clone();
-        let connection_manager = self.connection_manager.clone();
-        let id = self.id;
-
-        let fut = async move {
-            if msg.is_new_customer {
-                let res = connection_manager
-                    .send(RegisterCustomer {
-                        id,
-                        location: msg.customer_location,
-                        address: addr,
-                    })
-                    .await;
-
-                if let Err(e) = res {
-                    logger.error(&format!("Failed to register customer: {}", e));
-                    return;
-                }
-            }
-            logger.debug("Sending Restaurants");
-
-            let res2 = connection_manager
-                .send(SendRestaurantList { customer_id: id })
+    async fn handle(&mut self, msg: SendRestaurants, _ctx: &mut Self::Context) -> Self::Result {
+        if msg.is_new_customer {
+            let res = self.connection_manager
+                .send(RegisterCustomer {
+                    id: self.id,
+                    location: msg.customer_location,
+                    address: _ctx.address(),
+                })
                 .await;
 
-            if let Err(e) = res2 {
-                logger.error(&format!("Failed to register restaurant: {}", e));
+            if let Err(e) = res {
+                self.logger.error(&format!("Failed to register customer: {}", e));
+                return;
             }
-        };
-        Box::pin(fut.into_actor(self))
+        }
+        self.logger.debug("Sending Restaurants");
+
+        let res2 = self.connection_manager
+            .do_send(SendRestaurantList { customer_id: self.id });
+        
     }
 }
 
