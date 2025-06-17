@@ -319,6 +319,17 @@ Algunas consideraciones:
 
 ## Uso
 
+#### Como ejecutar script.sh
+
+La primera vez que se ejecuta, darle permisos con:
+```bash
+chmod +x script.sh
+```
+Para ejecutarlo:
+```bash
+./script.sh
+```
+
 Se deja las instrucciones para ejecutar las diversas apps:
 
 **Customer:**
@@ -400,7 +411,7 @@ cargo run -p rider <id>
 | Remove OrderInProgress Data | PedidosRust🦀               | Interno                     | `customer_id: u32`                                                      | Eliminar seguimiento de orden                                                                                   |
 | Push Pending Delivery Request | PedidosRust🦀             | Interno                     | `customer_id: u32, location: Location, from_new_customer: bool`         | Agregar orden pendiente                                                                                         |
 | Pop Pending Delivery Request | PedidosRust🦀              | Interno                     |                                                                         | Extraer orden pendiente                                                                                         |
-
+| Reconnection Mandate | PedidosRust🦀              | Customer/Rider/Restaurante/Payment 💲                |  `new_leader_id: u32, new_leader_port: u32`                        | Informa quien es el nuevo lider al que se tienen que conectar las entidades
 
 
 
