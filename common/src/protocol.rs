@@ -228,6 +228,12 @@ pub struct SendUpdateRiderData {
 
 #[derive(Message, Serialize, Deserialize, Debug, Clone)]
 #[rtype(result = "()")]
+pub struct SendUpdatePaymentSystemData {
+    pub port: u32,
+}
+
+#[derive(Message, Serialize, Deserialize, Debug, Clone)]
+#[rtype(result = "()")]
 pub struct SendUpdateOrderInProgressData {
     pub customer_id: u32,
     pub customer_location: Location,
@@ -271,6 +277,12 @@ pub struct SetupReconnection {
     pub read_half: ReadHalf<TcpStream>,
 }
 
+#[derive(Message, Debug)]
+#[rtype(result = "()")]
+pub struct UpdatePaymentSystemData {
+    pub port: u32,
+}
+
 pub const UNKNOWN_LEADER: u32 = 0;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -295,7 +307,7 @@ pub enum SocketMessage {
     OrderCalcelled(u32),             // u32 is customer_id
     OrderReady(u32, Location),       // u32 is customer_id
     InformLocation(Location, String), // Location is the new location, String is the restaurant name
-    RegisterPaymentSystem,
+    RegisterPaymentSystem(u32),      // u32 is payment system port
     RiderArrivedAtCustomer,
     DeliveryDone(u32), // u32 is customer_id
     IsConnectionReady,
@@ -312,6 +324,7 @@ pub enum SocketMessage {
     RemoveOrderInProgressData(u32),
     PushPendingDeliveryRequest(u32, Location, bool),
     PopPendingDeliveryRequest,
+    UpdatePaymentSystemData(u32), // u32 is port of the payment system data
     LeaderQuery,
     LeaderData(u32),               // u32 is leader canonical port
     ReconnectionMandate(u32, u32), // (u32, u32) = (new_leader_id, new_leader_port)

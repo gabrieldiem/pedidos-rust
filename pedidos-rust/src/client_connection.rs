@@ -410,9 +410,10 @@ impl ClientConnection {
                         customer_id: client_id,
                     });
                 }
-                SocketMessage::RegisterPaymentSystem => {
+                SocketMessage::RegisterPaymentSystem(port) => {
                     self.connection_manager.do_send(RegisterPaymentSystem {
                         address: ctx.address(),
+                        port,
                     });
                 }
                 SocketMessage::PaymentAuthorized(customer_id, amount, restaurant_name) => {

@@ -9,8 +9,8 @@ use actix_async_handler::async_handler;
 use common::protocol::{
     ElectionCall, ElectionCoordinator, ElectionOk, LeaderQuery, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
-    SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
-    Stop,
+    SendUpdateOrderInProgressData, SendUpdatePaymentSystemData, SendUpdateRestaurantData,
+    SendUpdateRiderData, SocketMessage, Stop, UpdatePaymentSystemData,
 };
 use common::tcp::tcp_message::TcpMessage;
 use common::tcp::tcp_sender::TcpSender;
@@ -223,6 +223,22 @@ impl Handler<ElectionCoordinator> for ServerPeer {
 }
 
 #[async_handler]
+impl Handler<SendUpdatePaymentSystemData> for ServerPeer {
+    type Result = ();
+
+    async fn handle(
+        &mut self,
+        msg: SendUpdatePaymentSystemData,
+        _ctx: &mut Self::Context,
+    ) -> Self::Result {
+        if let Err(e) = self.send_message(&SocketMessage::UpdatePaymentSystemData(msg.port)) {
+            self.logger.error(&e.to_string());
+            return;
+        }
+    }
+}
+
+#[async_handler]
 impl Handler<SendUpdateCustomerData> for ServerPeer {
     type Result = ();
 
@@ -413,6 +429,12 @@ impl ServerPeer {
                         .info(&format!("Updating data for rider {rider_id}"));
                     self.connection_manager
                         .do_send(UpdateRiderData { rider_id, location })
+                }
+                SocketMessage::UpdatePaymentSystemData(port) => {
+                    self.logger
+                        .info(&format!("Updating data for payment system {port}"));
+                    self.connection_manager
+                        .do_send(UpdatePaymentSystemData { port })
                 }
                 SocketMessage::RemoveOrderInProgressData(customer_id) => {
                     self.logger.info(&format!(

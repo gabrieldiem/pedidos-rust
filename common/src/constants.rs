@@ -1,8 +1,6 @@
 //! Constants used throughout the project
 
 pub const DEFAULT_PR_HOST: &str = "127.0.0.1";
-pub const DEFAULT_PR_PORT: u32 = 7504;
-pub const DEFAULT_PAYMENT_HOST: &str = "127.0.0.1";
 pub const DEFAULT_PAYMENT_PORT: u32 = 9000;
 
 pub const MIN_ORDER_DURATION: u64 = 5; // In seconds
