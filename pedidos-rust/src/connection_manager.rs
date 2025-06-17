@@ -1018,6 +1018,15 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                 self.logger
                     .debug(&format!("Restaurant list to send: {}", restaurant_list));
 
+                self.logger
+                    .error(&format!("customer_id: {}", msg.customer_id));
+                self.logger
+                    .error(&format!("customers: {:#?}", self.customers));
+                self.logger.error(&format!(
+                    "Customer connections: {:#?}",
+                    self.customer_connections
+                ));
+
                 match self.customer_connections.get(&msg.customer_id) {
                     Some(customer_address) => customer_address.do_send(Restaurants {
                         data: restaurant_list,
