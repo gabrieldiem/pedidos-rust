@@ -93,44 +93,59 @@ impl Handler<InformLocation> for Restaurant {
 impl Handler<PrepareOrder> for Restaurant {
     type Result = ();
 
-    async fn handle(
-        &mut self, _msg: PrepareOrder, _ctx: &mut Self::Context, ) -> Self::Result {
-        self.logger.info(&format!("Order received from customer {} with price {}", _msg.customer_id, _msg.price));
-        let response = SocketMessage::OrderInProgress(_msg.customer_id);
+    async fn handle(&mut self, msg: PrepareOrder, ctx: &mut Self::Context) {
+        self.logger.info(&format!(
+            "Order received from customer {} with price {}",
+            msg.customer_id, msg.price
+        ));
+
+        let response = SocketMessage::OrderInProgress(msg.customer_id);
         if let Err(e) = self.send_message(&response) {
             self.logger.error(&e.to_string());
             return;
         }
 
-        self.logger.info(&format!(
-            "Orden from client {} with price {} is in progress...",
-            _msg.customer_id, _msg.price
-        ));
         let secs = rand::rng().random_range(MIN_ORDER_DURATION..=MAX_ORDER_DURATION);
-        sleep(Duration::from_secs(secs)).await;
+        ctx.notify_later(ContinueOrder {
+            customer_id: msg.customer_id,
+            price: msg.price,
+        }, Duration::from_secs(secs));
+    }
+}
 
-        let accepted = random::<f32>() > ORDER_REJECTED_PROBABILITY;
+#[derive(Message)]
+#[rtype(result = "()")]
+pub struct ContinueOrder {
+    pub customer_id: u32,
+    pub price: f64,
+}
 
-        if !accepted{
+#[async_handler]
+impl Handler<ContinueOrder> for Restaurant {
+    type Result = ();
+
+    async fn handle(&mut self, msg: ContinueOrder, _ctx: &mut Self::Context) {
+        let accepted = rand::random::<f32>() > ORDER_REJECTED_PROBABILITY;
+
+        if !accepted {
             self.logger.info(&format!(
-                "Order from client {} with price {} rejected due to lack of stock",
-                _msg.customer_id, _msg.price
+                "Order from client {} rejected due to lack of stock",
+                msg.customer_id
             ));
-            let response = SocketMessage::OrderCalcelled(_msg.customer_id);
+            let response = SocketMessage::OrderCalcelled(msg.customer_id);
             if let Err(e) = self.send_message(&response) {
                 self.logger.error(&e.to_string());
-                return;
             }
             return;
         }
+
         self.logger.info(&format!(
             "Order from client {} with price {} is ready",
-            _msg.customer_id, _msg.price
+            msg.customer_id, msg.price
         ));
-        let response = SocketMessage::OrderReady(_msg.customer_id, self.location);
+        let response = SocketMessage::OrderReady(msg.customer_id, self.location);
         if let Err(e) = self.send_message(&response) {
             self.logger.error(&e.to_string());
-            return;
         }
     }
 }
