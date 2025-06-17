@@ -2,8 +2,8 @@ use crate::connection_manager::LeaderData;
 use crate::connection_manager::PeerId;
 use crate::{client_connection::ClientConnection, server_peer::ServerPeer};
 use actix::{Addr, Message};
-use common::protocol::Location;
-use std::collections::HashMap;
+use common::protocol::{Location, OrderData};
+use std::collections::{HashMap, VecDeque};
 
 #[derive(Message, Debug)]
 #[rtype(result = "()")]
@@ -140,6 +140,7 @@ pub struct UpdateCustomerData {
 pub struct UpdateRestaurantData {
     pub restaurant_name: String,
     pub location: Location,
+    pub pending_orders: VecDeque<OrderData>,
 }
 
 #[derive(Message, Debug, Clone)]

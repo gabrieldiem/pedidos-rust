@@ -17,7 +17,7 @@ use common::constants::{DEFAULT_PR_HOST, N_RIDERS_TO_NOTIFY, NO_RESTAURANTS};
 use common::protocol::{
     AuthorizePaymentRequest, DeliveryDone, DeliveryOffer, DeliveryOfferAccepted,
     DeliveryOfferConfirmed, ElectionCall, ElectionCoordinator, ExecutePayment, FinishDelivery,
-    LeaderQuery, Location, LocationUpdateForRider, OrderToRestaurant, PushNotification,
+    LeaderQuery, Location, LocationUpdateForRider, OrderData, OrderToRestaurant, PushNotification,
     Restaurants, RiderArrivedAtCustomer, SendPopPendingDeliveryRequest,
     SendPushPendingDeliveryRequest, SendRemoveOrderInProgressData, SendUpdateCustomerData,
     SendUpdateOrderInProgressData, SendUpdateRestaurantData, SendUpdateRiderData, SocketMessage,
@@ -60,18 +60,6 @@ pub struct RiderData {
     /// When set to `None`, it indicates that the location is unknown. This usually happens when the
     /// rider has been created but has not connected entirely with the manager.
     pub location: Option<Location>,
-}
-
-/// `OrderData` holds the information about current, unfinished orders.
-///
-/// Contains the ID of the Rider and of the Customer, the order price if it has been
-/// set, and the location of the Customer
-#[derive(Debug, Clone, Copy)]
-pub struct OrderData {
-    pub rider_id: Option<RiderId>,
-    pub order_price: Option<f64>,
-    pub customer_location: Location,
-    pub customer_id: CustomerId,
 }
 
 /// `CustomerData` holds the information about customers waiting for an order to be
@@ -897,36 +885,43 @@ impl Handler<RegisterRestaurant> for ConnectionManager {
         ));
         let restaurant_name = msg.name.clone();
         let restaurant_address = msg.address.clone();
-        let restaurant = self
-            .restaurants
-            .entry(msg.name.clone())
-            .or_insert(RestaurantData {
-                location: msg.location,
-                pending_orders: VecDeque::new(),
-            });
-        // Enviar un mensaje al restaurant por orden pendiente
-        for pending_order in restaurant.pending_orders.iter() {
-            match pending_order.order_price {
-                Some(price) => {
-                    restaurant_address.do_send(OrderToRestaurant {
-                        customer_id: pending_order.customer_id,
-                        price,
-                    });
-                }
-                None => {
-                    self.logger.debug(&format!(
-                        "Sending pending order to restaurant {} for customer {} without price",
-                        restaurant_name, pending_order.customer_id
-                    ));
+        let pending_orders = {
+            let restaurant = self
+                .restaurants
+                .entry(msg.name.clone())
+                .or_insert(RestaurantData {
+                    location: msg.location,
+                    pending_orders: VecDeque::new(),
+                });
+
+            // Send any pending orders to the restaurant.
+            for pending_order in restaurant.pending_orders.iter() {
+                match pending_order.order_price {
+                    Some(price) => {
+                        restaurant_address.do_send(OrderToRestaurant {
+                            customer_id: pending_order.customer_id,
+                            price,
+                        });
+                    }
+                    None => {
+                        self.logger.debug(&format!(
+                            "Sending pending order to restaurant {} for customer {} without price",
+                            restaurant_name, pending_order.customer_id
+                        ));
+                    }
                 }
             }
-        }
+
+            // Clone pending orders and drop the mutable borrow when the block ends.
+            restaurant.pending_orders.clone()
+        };
         self.restaurant_connections
             .insert(msg.name.clone(), msg.address);
 
         self.send_message_to_next_peer(SendUpdateRestaurantData {
             restaurant_name: msg.name,
             location: msg.location,
+            pending_orders,
         });
 
         self.process_pending_requests();
@@ -1707,6 +1702,7 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
             .entry(msg.restaurant_name.clone())
             .and_modify(|data| {
                 data.location = msg.location;
+                data.pending_orders = msg.pending_orders.clone()
             })
             .or_insert(RestaurantData {
                 location: msg.location,
@@ -1715,6 +1711,7 @@ impl Handler<UpdateRestaurantData> for ConnectionManager {
         self.send_message_to_next_peer(SendUpdateRestaurantData {
             restaurant_name: msg.restaurant_name.clone(),
             location: msg.location,
+            pending_orders: msg.pending_orders,
         });
 
         self.logger.info(&format!(

@@ -254,6 +254,7 @@ impl Handler<SendUpdateRestaurantData> for ServerPeer {
         if let Err(e) = self.send_message(&SocketMessage::UpdateRestaurantData(
             msg.restaurant_name,
             msg.location,
+            msg.pending_orders,
         )) {
             self.logger.error(&e.to_string());
             return;
@@ -398,12 +399,13 @@ impl ServerPeer {
                         order_price,
                     })
                 }
-                SocketMessage::UpdateRestaurantData(restaurant_name, location) => {
+                SocketMessage::UpdateRestaurantData(restaurant_name, location, pending_orders) => {
                     self.logger
                         .info(&format!("Updating data for restaurant {restaurant_name}"));
                     self.connection_manager.do_send(UpdateRestaurantData {
                         restaurant_name,
                         location,
+                        pending_orders,
                     })
                 }
                 SocketMessage::UpdateRiderData(rider_id, location) => {
