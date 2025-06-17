@@ -168,7 +168,8 @@ impl Handler<SetupReconnection> for PaymentSystem {
         PaymentSystem::add_stream(LinesStream::new(BufReader::new(read_half).lines()), _ctx);
         self.tcp_sender = tcp_sender;
 
-        self.logger.info("Reconnection established")
+        self.logger.info("Reconnection established");
+        _ctx.address().do_send(RegisterPaymentSystem {});
     }
 }
 

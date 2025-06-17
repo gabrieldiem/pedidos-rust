@@ -1,7 +1,9 @@
 use crate::restaurant::{Restaurant, Start};
 use actix::Addr;
+use common::udp_gateway::{InfoForUdpGatewayRequest, UdpGateway};
 use common::utils::logger::Logger;
 use std::{env, process};
+use tokio::spawn;
 
 mod restaurant;
 
@@ -22,11 +24,31 @@ fn parse_args() -> u32 {
     }
 }
 
-async fn run(customer: Addr<Restaurant>) -> std::io::Result<()> {
-    match customer.send(Start).await {
+async fn run(restaurant: Addr<Restaurant>, logger: Logger) -> std::io::Result<()> {
+    match restaurant.send(Start).await {
         Ok(_) => {}
         Err(e) => eprintln!("Could not start actor: {e}"),
     }
+
+    spawn(async move {
+        let data_res = restaurant.send(InfoForUdpGatewayRequest {}).await;
+        match data_res {
+            Ok(data) => {
+                if let Err(e) = UdpGateway::run::<Restaurant>(
+                    data.port,
+                    logger.clone(),
+                    restaurant,
+                    data.configuration,
+                    data.udp_socket,
+                )
+                .await
+                {
+                    logger.error(&format!("Connection gateway error during loop: {}", e));
+                }
+            }
+            Err(e) => eprintln!("Could not start UdpGateway: {e}"),
+        }
+    });
 
     actix_rt::signal::ctrl_c().await
 }
@@ -38,7 +60,7 @@ async fn main() {
 
     match Restaurant::new(id, logger.clone()).await {
         Ok(restaurant) => {
-            if let Err(error) = run(restaurant).await {
+            if let Err(error) = run(restaurant, logger.clone()).await {
                 logger.error(&format!("Restaurant failed: {error}"));
             }
         }

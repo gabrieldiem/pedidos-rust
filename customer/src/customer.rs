@@ -239,7 +239,7 @@ impl Handler<FinishDelivery> for Customer {
     type Result = ();
 
     async fn handle(&mut self, msg: FinishDelivery, _ctx: &mut Self::Context) -> Self::Result {
-        self.is_new_customer = false;
+        self.is_new_customer = true;
         self.logger.info(msg.reason.as_str());
 
         let addr = _ctx.address();

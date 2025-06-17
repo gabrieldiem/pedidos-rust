@@ -1018,15 +1018,6 @@ impl Handler<SendRestaurantList> for ConnectionManager {
                 self.logger
                     .debug(&format!("Restaurant list to send: {}", restaurant_list));
 
-                self.logger
-                    .error(&format!("customer_id: {}", msg.customer_id));
-                self.logger
-                    .error(&format!("customers: {:#?}", self.customers));
-                self.logger.error(&format!(
-                    "Customer connections: {:#?}",
-                    self.customer_connections
-                ));
-
                 match self.customer_connections.get(&msg.customer_id) {
                     Some(customer_address) => customer_address.do_send(Restaurants {
                         data: restaurant_list,
@@ -1231,7 +1222,7 @@ impl Handler<OrderRequest> for ConnectionManager {
             resto_data.pending_orders.push_back(nuevo_pedido);
         } else {
             self.logger
-                .warn("Failed to find restaurant data when preparing order");
+                .warn("Failed to find restaurant data when preparing order (first)");
         }
 
         self.send_message_to_next_peer(SendUpdateOrderInProgressData {
@@ -1248,7 +1239,7 @@ impl Handler<OrderRequest> for ConnectionManager {
             });
         } else {
             self.logger
-                .warn("Failed to find restaurant data when preparing order");
+                .warn("Failed to find restaurant data when preparing order (second)");
         }
         self.process_pending_requests();
     }
