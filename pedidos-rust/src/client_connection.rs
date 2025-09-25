@@ -467,11 +467,9 @@ impl ClientConnection {
         };
 
         // sending message
-        if let Err(e) = self.tcp_sender.try_send(TcpMessage {
+        self.tcp_sender.do_send(TcpMessage {
             data: msg_to_send + "\n",
-        }) {
-            return Err(format!("Failed to write to stream: {}", e));
-        }
+        });
 
         Ok(())
     }
