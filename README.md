@@ -30,6 +30,11 @@ Los comensales podrán solicitar un pedido a un restaurante, los restaurantes no
 1. [Aplicaciones](#Aplicaciones)
 1. [Estructura del repositorio y sistema](#Estructura-del-repositorio-y-sistema)
 1. [Uso](#Uso)
+1. [Diagrama de funcionamiento general de protocolo](#Diagrama-de-funcionamiento-general-de-protocolo)
+1. [Topología real física](#Topología-real-física)
+1. [Diagrama de elecciones](#Diagrama-de-elecciones)
+1. [Data ring](#Data-ring)
+1. [First connection probing](#First-connection-probing)
 1. [Diseño](#Diseño)
    1. [Pedidos-rust](#Pedidos-rust)
    1. [Customer](#Customer)
@@ -98,6 +103,40 @@ cargo run -p rider
 ```
 
 ---
+
+## Diagrama de funcionamiento general de protocolo
+
+<p align="center">
+    <img src="./docs/imgs/protocol.png" alt="Protocol diagram" height="500px">
+</p>
+
+## Topología real física
+
+<p align="center">
+    <img src="./docs/imgs/physical_network_topology.png" alt="Physical Network topology diagram" height="500px">
+</p>
+
+## Diagrama de elecciones
+
+<p align="center">
+    <img src="./docs/imgs/elections.png" alt="Elections diagram" height="600px">
+</p>
+
+<p align="center">
+    <img src="./docs/imgs/elections_colors.png" alt="Elections colors diagram" height="250px">
+</p>
+
+## Data ring
+
+<p align="center">
+    <img src="./docs/imgs/data_ring.png" alt="Data ring diagram" height="600px">
+</p>
+
+## First connection probing
+
+<p align="center">
+    <img src="./docs/imgs/first_connection_probing.png" alt="First connection probing diagram" height="500px">
+</p>
 
 ## Diseño
 
@@ -306,6 +345,18 @@ Por otro lado, con el objetivo de garantizar la integridad de datos entre las r�
     <img src="./docs/imgs/algos_distribuidos.jpeg" alt="algos_distribuidos" height="500px">
 </p>
 
+La solicitud de reconexión del nuevo líder luego de tomar el liderazgo se ve así:
+
+<p align="center">
+    <img src="./docs/imgs/reconnection_mandate.png" alt="reconnection_mandate" height="600px">
+</p>
+
+Luego:
+
+<p align="center">
+    <img src="./docs/imgs/reconnection.png" alt="reconnection" height="600px">
+</p>
+
 #### Mecanismo de pinger
 Para garantizar la detección de desconexiones de riders y restaurantes, habrá un componente “pinger” dentro del ConnectionManager. Este módulo recibe como entrada los identificadores (puertos UDP) de todos los actores que está rastreando y les envía, cada 500 ms, un paquete “ping” a través de UDP, separando así el canal de verificación de la conexión del flujo principal de mensajes TCP. Si un mismo actor deja de responder durante cinco pings consecutivos, se asume su desconexión. Una vez marcado como desconectado, el actor entra en un periodo de gracia de 40 s durante el cual puede volver a reconectarse sin pérdida de estado. Transcurrido este plazo sin respuesta, el pinger notifica al ConnectionManager que la conexión es irrecuperable y se procede a limpiar recursos asociados y a informar al resto del sistema la indisponibilidad definitiva de ese actor.
 
@@ -414,7 +465,7 @@ cargo run -p rider <id>
 | Reconnection Mandate | PedidosRust🦀              | Customer/Rider/Restaurante/Payment 💲                |  `new_leader_id: u32, new_leader_port: u32`                        | Informa quien es el nuevo lider al que se tienen que conectar las entidades
 
 
-## Connection Getaway
+## Connection Gateway
 
 ConnectionGateway se encarga de recibir y reenviar mensajes que circulan entre peers a través del anillo. Su rol puede resumirse así:
 
